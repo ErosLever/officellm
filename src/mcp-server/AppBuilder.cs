@@ -51,9 +51,26 @@ public static class AppBuilder
         {
             options.AddPolicy("AllowedOrigins", policy =>
             {
-                policy.WithOrigins(allowedOrigins)
-                      .AllowAnyHeader()
-                      .AllowAnyMethod();
+                if (allowedOrigins.Length == 0 ||
+                    (allowedOrigins.Length == 2 &&
+                     allowedOrigins[0] == "http://127.0.0.1:*" &&
+                     allowedOrigins[1] == "https://127.0.0.1:*"))
+                {
+                    // Default: allow any origin on localhost.
+                    // WithOrigins() does not support wildcard ports, so we use
+                    // SetIsOriginAllowed instead. The token enforces auth;
+                    // CORS is defence-in-depth only for a loopback-only server.
+                    policy.SetIsOriginAllowed(_ => true)
+                          .AllowAnyHeader()
+                          .AllowAnyMethod()
+                          .AllowCredentials();
+                }
+                else
+                {
+                    policy.WithOrigins(allowedOrigins)
+                          .AllowAnyHeader()
+                          .AllowAnyMethod();
+                }
             });
         });
 
@@ -62,6 +79,50 @@ public static class AppBuilder
 
         var app = builder.Build();
         app.UseCors("AllowedOrigins");
+
+        // ============================================================
+        // AUTH MIDDLEWARE
+        // Validates "Authorization: Bearer <token>" on every request.
+        // SignalR WebSocket connections carry the token as ?access_token=
+        // because browser WebSocket APIs cannot set custom headers.
+        // Exempt: /manifest.xml (fetched by Office host before add-in loads)
+        // ============================================================
+        app.Use(async (context, next) =>
+        {
+            var path = context.Request.Path.Value ?? "";
+
+            // manifest.xml must be reachable before the add-in has a token
+            if (path.Equals("/manifest.xml", StringComparison.OrdinalIgnoreCase))
+            {
+                await next();
+                return;
+            }
+
+            string? provided = null;
+
+            // Standard header: Authorization: Bearer <token>
+            var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+            if (authHeader != null && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                provided = authHeader["Bearer ".Length..].Trim();
+
+            // SignalR WebSocket fallback: ?access_token=<token>
+            if (provided == null)
+                provided = context.Request.Query["access_token"].FirstOrDefault();
+
+            if (provided == null || provided != BuildToken.Value)
+            {
+                context.Response.StatusCode = 401;
+                context.Response.Headers["WWW-Authenticate"] = "Bearer";
+                await context.Response.WriteAsync("Unauthorized");
+                return;
+            }
+
+            await next();
+        });
+
+        // Write token to disk on first run so external MCP clients can read it.
+        // Runs on the actual host machine, not the build machine.
+        WriteTokenFile();
 
         // --- Static file serving (PowerPoint/Word/Excel/Outlook add-in UI) ---
         string? staticFilesPath = Environment.GetEnvironmentVariable("STATIC_FILES_PATH")
@@ -413,5 +474,56 @@ public static class AppBuilder
             "text/html", System.Text.Encoding.UTF8));
 
         return app;
+    }
+
+    /// <summary>
+    /// Persists the compiled-in token to a user-readable file so external MCP
+    /// clients (e.g. Claude Desktop) can read it once on the actual host machine.
+    ///
+    /// Cross-platform paths:
+    ///   Windows : %APPDATA%\OfficeMcpServer\token
+    ///   macOS   : ~/.config/OfficeMcpServer/token
+    ///   Linux   : ~/.config/OfficeMcpServer/token
+    /// </summary>
+    /// <summary>
+    /// Returns the cross-platform config directory:
+    ///   Windows : %APPDATA%\OfficeMcpServer
+    ///   macOS   : ~/Library/Application Support/OfficeMcpServer  (SpecialFolder.ApplicationData)
+    ///   Linux   : $XDG_CONFIG_HOME/OfficeMcpServer or ~/.config/OfficeMcpServer
+    /// Note: SpecialFolder.ApplicationData on macOS returns ~/Library/Application Support,
+    /// NOT ~/.config. This is the correct macOS convention.
+    /// </summary>
+    internal static string GetConfigDirectory()
+        => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "OfficeMcpServer");
+
+    private static void WriteTokenFile()
+    {
+        try
+        {
+            var dir = GetConfigDirectory();
+            Directory.CreateDirectory(dir);
+            var tokenPath = Path.Combine(dir, "token");
+            File.WriteAllText(tokenPath, BuildToken.Value);
+
+            // chmod 600 on Unix — owner read/write only
+            if (!OperatingSystem.IsWindows())
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "chmod",
+                    Arguments = $"600 \"{tokenPath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                })?.WaitForExit();
+            }
+
+            Console.WriteLine($"Token file: {tokenPath}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: could not write token file: {ex.Message}");
+        }
     }
 }

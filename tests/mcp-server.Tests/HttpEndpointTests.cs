@@ -16,6 +16,8 @@ public class HttpEndpointTests : IClassFixture<WebApplicationFactory<Program>>
     public HttpEndpointTests(WebApplicationFactory<Program> factory)
     {
         _client = factory.CreateClient();
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", BuildToken.Value);
         // Reset static state before each test class run
         Tools.McpToolEngine.ResetForTesting();
     }

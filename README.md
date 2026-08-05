@@ -1,6 +1,9 @@
-# Office LLM Harness
+# Office LLM Harness (fork)
 
-A Windows desktop Office add-in harness that exposes controlled document interaction tools to Open WebUI through a local MCP server, enabling LLM-assisted workflows in Word, Excel, PowerPoint and Outlook.
+> **This is a fork of [volkermauel/officellm](https://github.com/volkermauel/officellm).**
+> Changes introduced in this fork are listed in the [Fork Changes](#fork-changes) section below.
+
+A cross-platform (macOS + Windows) Office add-in harness that exposes controlled document interaction tools to any MCP-compatible LLM client through a local MCP server, enabling LLM-assisted workflows in Word, Excel, PowerPoint and Outlook.
 
 ## Architecture
 
@@ -25,7 +28,7 @@ A Windows desktop Office add-in harness that exposes controlled document interac
 | - MCP protocol endpoint (port 3000)                   |
 | - Tool registry & command dispatch                    |
 | - Instance registry with heartbeat tracking           |
-| - Two-phase confirmation for mutations                |
+| - Bearer-token authentication (all endpoints)         |
 | - Audit log (JSONL)                                   |
 +------------------------------------------------------+
 ```
@@ -84,11 +87,19 @@ specs/                    # Speckit specifications
 
 ### Prerequisites
 
-- **Windows** with Office desktop (PowerPoint 2019+ or Microsoft 365)
+- **macOS or Windows** with Office desktop (Microsoft 365 recommended; Office 2019+ minimum)
 - **.NET 8 SDK** (for building the MCP server)
 - **Node.js 18+** and **npm** (for building the add-in)
 
 ### Build
+
+**First-time setup — generate the API token before building:**
+
+```bash
+node scripts/generate-token.mjs
+```
+
+This writes `.env` and `src/mcp-server/GeneratedToken.cs` (both gitignored). The same token is compiled into the MCP server binary and the add-in JS bundle. Re-run to rotate the token; then rebuild both components.
 
 ```bash
 # Build everything (production)
@@ -97,7 +108,7 @@ specs/                    # Speckit specifications
 # Build MCP server only
 ./scripts/build.sh mcp
 
-# Build PowerPoint add-in only
+# Build add-in only
 ./scripts/build.sh addin
 
 # Development mode (add-in with hot reload)
@@ -109,31 +120,91 @@ specs/                    # Speckit specifications
 ```bash
 # 1. Start the MCP server
 dotnet run --project src/mcp-server/
+# On first run the server prints the token file location, e.g.:
+#   Token file: /Users/you/Library/Application Support/OfficeMcpServer/token  (macOS)
+#   Token file: C:\Users\you\AppData\Roaming\OfficeMcpServer\token             (Windows)
 
-# Or use the published executable:
-# ./src/mcp-server/publish/win-x64/office-mcp-server.exe
+# 2. Configure your MCP client (e.g. Claude Desktop) — see "MCP Client Setup" below
 
-# 2. Sideload the PowerPoint add-in
-# See "Add-in Sideloading" section below
+# 3. Sideload the Office add-in — see "Add-in Sideloading" below
 
-# 3. Open PowerPoint and load the add-in
-# File → Options → Trust Center → Trust Center Settings → Trusted Add-ins
+# 4. Open Word / Excel / PowerPoint and activate the add-in from the task pane
 ```
+
+### MCP Client Setup
+
+The server requires a Bearer token on every request. After building, the token is written to:
+
+| Platform | Path |
+|---|---|
+| macOS | `~/Library/Application Support/OfficeMcpServer/token` |
+| Linux | `~/.config/OfficeMcpServer/token` |
+| Windows | `%APPDATA%\OfficeMcpServer\token` |
+
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "office": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer <paste token here>"
+      }
+    }
+  }
+}
+```
+
+Read the token with:
+- macOS: `cat ~/Library/Application\ Support/OfficeMcpServer/token`
+- Linux: `cat ~/.config/OfficeMcpServer/token`
+- Windows: `type %APPDATA%\OfficeMcpServer\token`
 
 ### Add-in Sideloading
 
-For development, sideload the add-in by pointing PowerPoint to the manifest:
+The single manifest (`src/powerpoint-addin/manifest.xml`) works for all Office hosts (Word, Excel, PowerPoint, Outlook).
 
-1. Open PowerPoint
-2. Go to **File → Options → Trust Center → Trust Center Settings**
-3. Select **Trusted Add-in Publishers**
-4. Click **Add** and browse to `src/powerpoint-addin/manifest.xml`
+**macOS** — `office-addin-debugging` does not support Word/Excel/PowerPoint on macOS.
+Use the watched-folder method:
 
-Or use the [Office Add-in CLI](https://learn.microsoft.com/office/dev/add-ins/testing/create-a-network-shared-folder-add-in-for-word) for network sideloading:
+1. Start the dev server (generates `manifest.dev.xml`):
+   ```bash
+   cd src/powerpoint-addin && npm run dev
+   ```
 
-```bash
-npx office-addin-debugging start src/powerpoint-addin/manifest.xml ppt
-```
+2. Copy the manifest into the Office app's watched folder:
+   ```bash
+   # Word
+   mkdir -p ~/Library/Containers/com.microsoft.Word/Data/Documents/wef
+   cp src/powerpoint-addin/manifest.dev.xml \
+      ~/Library/Containers/com.microsoft.Word/Data/Documents/wef/
+
+   # Excel
+   mkdir -p ~/Library/Containers/com.microsoft.Excel/Data/Documents/wef
+   cp src/powerpoint-addin/manifest.dev.xml \
+      ~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/
+
+   # PowerPoint
+   mkdir -p ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef
+   cp src/powerpoint-addin/manifest.dev.xml \
+      ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef/
+   ```
+
+3. Quit the Office app completely (Cmd+Q) and reopen it.
+
+4. The add-in appears as a button in the ribbon. In Word it shows up in the **Home** tab
+   (not **Insert → Add-ins**; the "Add-ins" entry in the Developer menu opens the VBA
+   dialog and will not work for Office JS add-ins).
+
+> Note: `Insert → Add-ins → My Add-ins → Upload My Add-in` is present in some M365
+> builds but hidden in others; the watched-folder method works universally.
+
+**Windows** — shared folder sideloading:
+
+1. Open any Office app → **File → Options → Trust Center → Trust Center Settings**
+2. Select **Trusted Add-in Catalogs** → add the folder containing `manifest.xml`
+3. Restart Office and insert the add-in from **Insert → My Add-ins**
 
 ## Development
 
@@ -142,8 +213,8 @@ npx office-addin-debugging start src/powerpoint-addin/manifest.xml ppt
 ```bash
 cd src/powerpoint-addin
 npm install
-npm run dev    # Starts webpack dev server on port 3000
-npm run build  # Production build
+npm run dev    # Generates token if missing, then starts webpack dev server on port 3001
+npm run build  # Generates token if missing, then produces production bundle
 ```
 
 ### MCP Server
@@ -151,8 +222,12 @@ npm run build  # Production build
 ```bash
 cd src/mcp-server
 dotnet restore
-dotnet run     # Development
-dotnet publish -c Release -r win-x64 --self-contained true  # Production executable
+dotnet run     # Pre-build generates token if missing; server binds to 127.0.0.1:3000
+
+# Production — build for your platform:
+dotnet publish -c Release -r osx-arm64 --self-contained true  # macOS Apple Silicon
+dotnet publish -c Release -r osx-x64  --self-contained true  # macOS Intel
+dotnet publish -c Release -r win-x64  --self-contained true  # Windows
 ```
 
 ## Development Notes
@@ -255,6 +330,49 @@ See [`specs/`](specs/) for detailed feature specifications organized by implemen
 - [Phase 2: Word MVP](specs/003-word-mvp/) - Word tools + shared context
 - [Phase 3: Excel MVP](specs/004-excel-mvp/) - Excel read/write tools
 - [Phase 4: Outlook MVP](specs/005-outlook-mvp/) - Email tools + policy filter
+
+## Fork Changes
+
+This fork diverges from [volkermauel/officellm](https://github.com/volkermauel/officellm) in the following ways.
+
+### macOS support
+
+The upstream targets Windows exclusively (`RuntimeIdentifier: win-x64`, Windows-only sideloading instructions). This fork:
+
+- Documents and tests `dotnet publish` targets for `osx-arm64` and `osx-x64`
+- Uses `Environment.SpecialFolder.ApplicationData` for all file paths (resolves to `~/Library/Application Support` on macOS, `%APPDATA%` on Windows) — already correct in the upstream `AuditLog.cs`, now consistently used in the new token infrastructure
+- Replaces the upstream `office-addin-debugging` sideloading instructions (CLI does not support macOS Office apps) with the correct watched-folder and Insert→Add-ins method
+
+### Bearer-token authentication
+
+The upstream server has **no authentication** — any local process can call any endpoint and read or modify any open document.
+
+This fork adds compile-time token authentication across the entire server:
+
+| File | Change |
+|---|---|
+| `scripts/generate-token.mjs` | **New.** Generates a 32-byte random token, writes `.env` (for webpack) and `src/mcp-server/GeneratedToken.cs` (for C#). Idempotent. |
+| `.gitignore` | Added `.env` and `GeneratedToken.cs` — the token is never committed. |
+| `src/mcp-server/OfficeMcpServer.csproj` | Added `<Compile Include="GeneratedToken.cs"/>` and a pre-build `<Target>` that auto-runs the generate script if the file is missing. |
+| `src/mcp-server/AppBuilder.cs` | Added ASP.NET middleware that checks `Authorization: Bearer <token>` on every request. `?access_token=` is accepted as fallback for SignalR WebSocket connections (browsers cannot set WebSocket headers). `/manifest.xml` is the only exempt path (fetched by the Office host before the add-in has a token). On startup, `WriteTokenFile()` writes the compiled-in token to the platform config dir (`~/Library/Application Support/OfficeMcpServer/token` on macOS, `%APPDATA%\OfficeMcpServer\token` on Windows) with chmod 600 on Unix. |
+| `src/powerpoint-addin/webpack.config.js` | Reads token from `.env`, injects it as `__MCP_TOKEN__` via `webpack.DefinePlugin`. Fails the build if `.env` is missing. |
+| `src/powerpoint-addin/src/communication.ts` | Declares `__MCP_TOKEN__`, exposes `authHeaders()` helper, spreads auth header into every `fetch` call, appends `?access_token=` to the SignalR hub URL. |
+| `src/powerpoint-addin/src/globals.d.ts` | **New.** TypeScript ambient declaration for `__MCP_TOKEN__`. |
+| `src/powerpoint-addin/package.json` | Added `generate-token` script; `build` and `dev` scripts call it automatically. |
+
+**Token rotation:** delete `.env` and `src/mcp-server/GeneratedToken.cs`, re-run `node scripts/generate-token.mjs`, then rebuild both components. The old token immediately stops working.
+
+**External MCP clients** (Claude Desktop, etc.) read the token from the platform path above (written by the server on first startup) and include it as `Authorization: Bearer <token>` — see [MCP Client Setup](#mcp-client-setup).
+
+### Pending security hardening (not yet implemented)
+
+The following findings from an internal security review remain open:
+
+- **Instance ID predictability** — IDs are sequential (`word_1`, `word_2`). Should use random UUIDs.
+- **SignalR group join unauthenticated** — any connected WebSocket can join any instance group. Needs a per-instance join secret.
+- **Result injection** — `POST /instances/{id}/result` does not verify the submitter owns the command. Needs ownership check in `CompleteCommand`.
+- **`office_export_document` has no confirmation gate** — exports the full document binary with no user prompt.
+- **`outlook_send_message` token validation is prefix-only** — `confirmationToken.startsWith("confirm_")` accepts any crafted string.
 
 ## License
 

@@ -1,15 +1,44 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <!-- Expose internals to the test project -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>mcp-server.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishTrimmed>false</PublishTrimmed>
+    <!-- RuntimeIdentifier is set only at publish time via -r flag, not here.
+         Setting it here would force all builds (including test runs) into a
+         platform-specific output subdirectory, breaking cross-platform development. -->
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
     <AssemblyName>office-mcp-server</AssemblyName>
   </PropertyGroup>
+
+  <!--
+    Pre-build: if GeneratedToken.cs is missing, run generate-token.mjs.
+    Requires Node.js on PATH. On CI, run the script explicitly before dotnet build.
+  -->
+  <Target Name="EnsureTokenGenerated" BeforeTargets="BeforeBuild">
+    <PropertyGroup>
+      <GeneratedTokenPath>$(MSBuildProjectDirectory)/GeneratedToken.cs</GeneratedTokenPath>
+      <TokenScriptPath>$(MSBuildProjectDirectory)/../../scripts/generate-token.mjs</TokenScriptPath>
+    </PropertyGroup>
+    <Message Text="Checking for GeneratedToken.cs..." Importance="normal" />
+    <Exec
+      Condition="!Exists('$(GeneratedTokenPath)')"
+      Command="node &quot;$(TokenScriptPath)&quot;"
+      WorkingDirectory="$(MSBuildProjectDirectory)"
+    />
+    <Error
+      Condition="!Exists('$(GeneratedTokenPath)')"
+      Text="GeneratedToken.cs still missing after running generate-token.mjs. Ensure Node.js is on PATH." />
+  </Target>
 
 </Project>

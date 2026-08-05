@@ -9,6 +9,15 @@ import * as signalR from "@microsoft/signalr";
 
 export const MCP_SERVER_URL = "http://127.0.0.1:3000";
 
+// Injected by webpack DefinePlugin at build time from .env MCP_API_TOKEN.
+declare const __MCP_TOKEN__: string;
+const MCP_TOKEN: string = __MCP_TOKEN__;
+
+/** Returns the Authorization header object for fetch calls. */
+function authHeaders(): Record<string, string> {
+	return { Authorization: `Bearer ${MCP_TOKEN}` };
+}
+
 // --- State ---
 let instanceId: string | null = null;
 let hubConnection: signalR.HubConnection | null = null;
@@ -52,7 +61,7 @@ export async function registerWithMcp(
 ): Promise<string> {
 	const response = await fetch(`${MCP_SERVER_URL}/instances/register`, {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		headers: { "Content-Type": "application/json", ...authHeaders() },
 		body: JSON.stringify({ appName, documentName }),
 	});
 
@@ -93,7 +102,7 @@ export async function connectSignalR(): Promise<void> {
 	if (!instanceId) return;
 
 	const connection = new signalR.HubConnectionBuilder()
-		.withUrl(`${MCP_SERVER_URL}/hubs/commands`)
+		.withUrl(`${MCP_SERVER_URL}/hubs/commands?access_token=${MCP_TOKEN}`)
 		.withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
 		.configureLogging(signalR.LogLevel.Warning)
 		.build();
@@ -181,7 +190,7 @@ export async function sendHeartbeat(): Promise<void> {
 	try {
 		await fetch(`${MCP_SERVER_URL}/instances/${instanceId}/heartbeat`, {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: { "Content-Type": "application/json", ...authHeaders() },
 			body: JSON.stringify({ appName: "PowerPoint", documentName: "(active)" }),
 		});
 	} catch (error) {
@@ -217,6 +226,7 @@ export async function pollForCommands(): Promise<PendingCommand[]> {
 	try {
 		const response = await fetch(
 			`${MCP_SERVER_URL}/instances/${instanceId}/commands`,
+			{ headers: authHeaders() },
 		);
 		if (!response.ok) return [];
 
@@ -273,7 +283,7 @@ export async function reportResult(
 		try {
 			const response = await fetch(url, {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: { "Content-Type": "application/json", ...authHeaders() },
 				body: JSON.stringify(body),
 			});
 			if (response.ok) return;

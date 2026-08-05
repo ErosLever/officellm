@@ -11,3 +11,13 @@ dist/
 
 # Production config — internal URLs, do not commit
 helm/*/values-production.yaml
+
+# Generated auth token — never commit
+.env
+src/mcp-server/GeneratedToken.cs
+
+# Claude Code project settings contain the token — never commit
+.claude/settings.json
+
+# Generated dev manifest with hardcoded localhost URLs
+src/powerpoint-addin/manifest.dev.xml

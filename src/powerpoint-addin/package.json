@@ -4,8 +4,10 @@
   "description": "PowerPoint add-in for Office LLM Harness - connects to local MCP server",
   "private": true,
   "scripts": {
-    "build": "webpack --mode production",
-    "dev": "webpack serve --mode development --port 3000",
+    "generate-token": "node ../../scripts/generate-token.mjs",
+    "generate-manifest": "node -e \"const fs=require('fs');const t=fs.readFileSync('manifest.xml','utf8').replace(/{{BASE_URL}}/g,'http://127.0.0.1:3001').replace(/{{SCHEME}}/g,'http').replace(/{{HOST}}/g,'127.0.0.1:3001');fs.writeFileSync('manifest.dev.xml',t);console.log('Written manifest.dev.xml (sideload this into Office)')\"",
+    "build": "npm run generate-token && webpack --mode production",
+    "dev": "npm run generate-token && npm run generate-manifest && webpack serve --mode development --port 3001",
     "start": "npm run dev",
     "test": "vitest run",
     "test:watch": "vitest"

@@ -9,6 +9,7 @@ import {
 	registerWithMcp,
 	startHeartbeat,
 	pollForCommands,
+	reportResult,
 	getOfficeState,
 	connectSignalR,
 	setCommandHandler,
@@ -184,8 +185,17 @@ async function processPendingCommands(): Promise<void> {
 		const commands = await pollForCommands();
 		for (const cmd of commands) {
 			addLogEntry(`Executing: ${cmd.command}`);
-			await processCommand(cmd.id, cmd.command, cmd.args);
-			addLogEntry(`Command ${cmd.id} completed`);
+			try {
+				const result = await processCommand(cmd.id, cmd.command, cmd.args);
+				const success = !(result && typeof result === "object" && "error" in (result as any));
+				const error = success ? undefined : ((result as any).error as string);
+				await reportResult(cmd.id, success, error, result);
+				addLogEntry(`Command ${cmd.id} completed`);
+			} catch (err) {
+				const errMsg = err instanceof Error ? err.message : String(err);
+				await reportResult(cmd.id, false, errMsg, null);
+				addLogEntry(`Command ${cmd.id} failed: ${errMsg}`);
+			}
 		}
 	} catch (error) {
 		addLogEntry(
