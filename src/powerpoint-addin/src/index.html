@@ -357,7 +357,7 @@
     <div class="container">
       <header>
         <h1>Office LLM Harness</h1>
-        <p>PowerPoint &middot; MCP Bridge</p>
+        <p id="hostSubtitle">Office &middot; MCP Bridge</p>
       </header>
 
       <!-- Connection Status -->
@@ -378,18 +378,7 @@
       <!-- Document Context -->
       <div class="context-section" id="contextSection" style="display: none">
         <h2>Document Context</h2>
-        <div class="status-row">
-          <span class="status-label">Presentation</span>
-          <span id="docName" class="status-value">—</span>
-        </div>
-        <div class="status-row">
-          <span class="status-label">Slide</span>
-          <span id="slideInfo" class="status-value">—</span>
-        </div>
-        <div class="status-row">
-          <span class="status-label">Slides</span>
-          <span id="slideCount" class="status-value">—</span>
-        </div>
+        <div id="contextRows"></div>
       </div>
 
       <!-- Actions -->

@@ -1,18 +1,20 @@
 using OfficeMcpServer.Models;
+using System.Collections.Generic;
 
 namespace OfficeMcpServer.Tests;
 
 public class InstanceRegistryTests
 {
     [Fact]
-    public void RegisterInstance_ReturnsIncrementingIds()
+    public void RegisterInstance_UsesProposedId_WhenValid()
     {
         var registry = new InstanceRegistry();
-        var id1 = registry.RegisterInstance("PowerPoint", "deck1.pptx");
-        var id2 = registry.RegisterInstance("PowerPoint", "deck2.pptx");
+        var id1 = registry.RegisterInstance("PowerPoint", "deck1.pptx", "ppt_deck1_a3f2c1");
+        var id2 = registry.RegisterInstance("PowerPoint", "deck2.pptx", "ppt_deck2_b7e409");
 
-        Assert.Equal("powerpoint_1", id1);
-        Assert.Equal("powerpoint_2", id2);
+        Assert.Equal("ppt_deck1_a3f2c1", id1);
+        Assert.Equal("ppt_deck2_b7e409", id2);
+        Assert.NotEqual(id1, id2);
     }
 
     [Fact]
@@ -117,32 +119,46 @@ public class InstanceRegistryTests
     }
 
     [Fact]
-    public void RegisterInstance_HostSpecificPrefixes()
+    public void RegisterInstance_InvalidProposedId_FallsBackToRandomId()
     {
         var registry = new InstanceRegistry();
-        var ppt = registry.RegisterInstance("PowerPoint", "deck.pptx");
-        var word = registry.RegisterInstance("Word", "doc.docx");
-        var excel = registry.RegisterInstance("Excel", "sheet.xlsx");
-        var outlook = registry.RegisterInstance("Outlook", "inbox");
-        var unknown = registry.RegisterInstance("CustomApp", "test");
+        // Invalid: contains uppercase, spaces, starts with digit
+        var id1 = registry.RegisterInstance("PowerPoint", "deck.pptx", "Bad ID!");
+        var id2 = registry.RegisterInstance("Word", "doc.docx", "1invalid");
+        var id3 = registry.RegisterInstance("Excel", "sheet.xlsx", null);
 
-        Assert.Equal("powerpoint_1", ppt);
-        Assert.Equal("word_2", word);
-        Assert.Equal("excel_3", excel);
-        Assert.Equal("outlook_4", outlook);
-        Assert.Equal("office_5", unknown);
+        // All should fall back to something valid (office_ prefix + hex)
+        Assert.All(new[] { id1, id2, id3 }, id =>
+        {
+            Assert.NotEmpty(id);
+            Assert.Matches(@"^[a-z][a-z0-9_]+$", id);
+        });
+        // All distinct
+        Assert.Equal(3, new HashSet<string> { id1, id2, id3 }.Count);
     }
 
     [Fact]
-    public void RegisterInstance_MixedHosts_IncrementCorrectly()
+    public void RegisterInstance_SameProposedId_RefreshesHeartbeat()
     {
         var registry = new InstanceRegistry();
-        var id1 = registry.RegisterInstance("PowerPoint", "a.pptx");
-        var id2 = registry.RegisterInstance("Word", "b.docx");
-        var id3 = registry.RegisterInstance("PowerPoint", "c.pptx");
+        var id1 = registry.RegisterInstance("Word", "doc.docx", "word_doc_abc123");
+        var id2 = registry.RegisterInstance("Word", "doc.docx", "word_doc_abc123");
 
-        Assert.Equal("powerpoint_1", id1);
-        Assert.Equal("word_2", id2);
-        Assert.Equal("powerpoint_3", id3);
+        Assert.Equal(id1, id2);
+        Assert.Single(registry.GetActiveInstances());
+    }
+
+    [Fact]
+    public void RegisterInstance_DifferentHosts_AllDistinct()
+    {
+        var registry = new InstanceRegistry();
+        var ppt  = registry.RegisterInstance("PowerPoint", "deck.pptx", "ppt_deck_111111");
+        var word = registry.RegisterInstance("Word",        "doc.docx",  "word_doc_222222");
+        var xl   = registry.RegisterInstance("Excel",       "sheet.xlsx","excel_sheet_333333");
+
+        Assert.Equal(3, new HashSet<string> { ppt, word, xl }.Count);
+        Assert.StartsWith("ppt_",   ppt);
+        Assert.StartsWith("word_",  word);
+        Assert.StartsWith("excel_", xl);
     }
 }

@@ -186,8 +186,9 @@ public static class AppBuilder
             var data = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json);
             string appName = data.GetProperty("appName").GetString() ?? "Unknown";
             string documentName = data.TryGetProperty("documentName", out var dn) ? dn.GetString() ?? "" : "";
+            string? proposedId = data.TryGetProperty("instanceId", out var pid) ? pid.GetString() : null;
 
-            string instanceId = registry.RegisterInstance(appName, documentName);
+            string instanceId = registry.RegisterInstance(appName, documentName, proposedId);
             Console.WriteLine($"Registered instance: {instanceId} ({appName} - {documentName})");
             return Results.Json(new { instanceId, appName, documentName });
         });

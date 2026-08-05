@@ -76,11 +76,7 @@ async function initWithMcp(): Promise<void> {
 		const state = await getOfficeState();
 		instanceId = await registerWithMcp(state.app, state.documentName);
 		updateMcpStatus(true);
-		updateContextDisplay(
-			state.documentName,
-			state.slideCount,
-			state.currentSlideIndex,
-		);
+		updateContextDisplay(state);
 
 		// Start heartbeat
 		startHeartbeat(10000);
@@ -135,22 +131,43 @@ function updateOfficeStatus(ready: boolean): void {
 	el.textContent = ready ? "Ready" : "Not Ready";
 }
 
-function updateContextDisplay(
-	docName: string,
-	slideCount: number,
-	currentSlide: number,
-): void {
+function updateContextDisplay(state: import("./communication").OfficeState): void {
 	const section = document.getElementById("contextSection");
-	const nameEl = document.getElementById("docName");
-	const slideEl = document.getElementById("slideInfo");
-	const countEl = document.getElementById("slideCount");
+	const rows = document.getElementById("contextRows");
+	const subtitle = document.getElementById("hostSubtitle");
+	if (!section || !rows) return;
 
-	if (section) section.style.display = "block";
-	if (nameEl) nameEl.textContent = docName || "Untitled";
-	if (slideEl)
-		slideEl.textContent = currentSlide >= 0 ? `Slide ${currentSlide + 1}` : "—";
-	if (countEl)
-		countEl.textContent = `${slideCount} slide${slideCount !== 1 ? "s" : ""}`;
+	section.style.display = "block";
+
+	const host = state.app.toLowerCase();
+
+	if (subtitle) {
+		subtitle.textContent = `${state.app} · MCP Bridge`;
+	}
+
+	const items: Array<[string, string]> = [
+		[host === "word" ? "Document" : host === "excel" ? "Workbook" : "Presentation",
+		 state.documentName || "Untitled"],
+	];
+
+	if (host === "word") {
+		items.push(["Paragraphs", String(state.paragraphCount)]);
+		items.push(["Words", String(state.wordCount)]);
+	} else if (host === "excel") {
+		items.push(["Active Sheet", state.activeSheetName || "—"]);
+		items.push(["Sheets", String(state.sheetCount)]);
+	} else {
+		items.push(["Slide", state.currentSlideIndex >= 0 ? `Slide ${state.currentSlideIndex + 1}` : "—"]);
+		items.push(["Slides", `${state.slideCount} slide${state.slideCount !== 1 ? "s" : ""}`]);
+	}
+
+	rows.innerHTML = items
+		.map(([label, value]) =>
+			`<div class="status-row">
+				<span class="status-label">${label}</span>
+				<span class="status-value">${value}</span>
+			</div>`)
+		.join("");
 }
 
 function addLogEntry(message: string): void {
@@ -213,11 +230,7 @@ async function refreshContext(): Promise<void> {
 
 	try {
 		const state = await getOfficeState();
-		updateContextDisplay(
-			state.documentName,
-			state.slideCount,
-			state.currentSlideIndex,
-		);
+		updateContextDisplay(state);
 		addLogEntry(`Context refreshed: ${state.documentName}`);
 
 		// Re-register with updated info

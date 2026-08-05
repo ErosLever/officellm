@@ -57,16 +57,68 @@ export function getConnectionState(): ConnectionState {
  * Registers this add-in instance with the MCP server.
  * Returns the assigned instance ID.
  */
+/**
+ * Derives a stable, human-readable instance ID.
+ * Format: {host}_{docSlug}_{hash6}  e.g. "word_report_a3f2c1"
+ *
+ * For saved documents the hash is computed from the document URL — stable
+ * across reloads of the same file.
+ * For unsaved documents a random suffix is generated once and persisted in
+ * localStorage keyed by host, so it survives reloads within the same session.
+ */
+function deriveInstanceId(appName: string, documentName: string, docUrl: string): string {
+	const hostMap: Record<string, string> = {
+		word: "word", excel: "excel", powerpoint: "ppt", outlook: "outlook",
+	};
+	const host = hostMap[appName.toLowerCase()] ?? "office";
+
+	const rawSlug = (documentName || "untitled")
+		.toLowerCase()
+		.replace(/\.[^.]+$/, "")         // strip file extension
+		.replace(/[^a-z0-9]+/g, "_")     // non-alphanumeric → underscore
+		.replace(/^_+|_+$/g, "")         // trim leading/trailing underscores
+		.slice(0, 16) || "untitled";
+
+	let hash: string;
+	if (docUrl) {
+		// FNV-1a 32-bit over the URL — deterministic, stable across reloads
+		let h = 0x811c9dc5;
+		for (let i = 0; i < docUrl.length; i++) {
+			h ^= docUrl.charCodeAt(i);
+			h = Math.imul(h, 0x01000193) >>> 0;
+		}
+		hash = h.toString(16).padStart(8, "0").slice(0, 6);
+	} else {
+		// Unsaved document: persist a random suffix in localStorage so the same
+		// document gets the same ID across reloads within the same browser session.
+		const lsKey = `officellm_instance_${host}`;
+		hash = localStorage.getItem(lsKey) ?? "";
+		if (!hash) {
+			hash = Math.random().toString(16).slice(2, 8);
+			localStorage.setItem(lsKey, hash);
+		}
+	}
+
+	return `${host}_${rawSlug}_${hash}`;
+}
+
 export async function registerWithMcp(
 	appName: string,
 	documentName: string,
 ): Promise<string> {
 	_registeredAppName = appName;
 	_registeredDocumentName = documentName;
+
+	const docUrl: string = (() => {
+		try { return (window as any).Office?.context?.document?.url ?? ""; }
+		catch { return ""; }
+	})();
+	const proposedId = deriveInstanceId(appName, documentName, docUrl);
+
 	const response = await fetch(`${MCP_SERVER_URL}/instances/register`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json", ...authHeaders() },
-		body: JSON.stringify({ appName, documentName }),
+		body: JSON.stringify({ appName, documentName, instanceId: proposedId }),
 	});
 
 	if (!response.ok) {
@@ -316,41 +368,96 @@ export async function reportResult(
 export interface OfficeState {
 	app: string;
 	documentName: string;
+	// PowerPoint
 	slideCount: number;
 	currentSlideIndex: number;
+	// Word
+	paragraphCount: number;
+	wordCount: number;
+	// Excel
+	sheetCount: number;
+	activeSheetName: string;
 }
 
 /**
- * Gets basic Office state information.
+ * Gets host-aware Office state. Reads host-specific metrics
+ * (paragraph/word count for Word, sheet info for Excel, slide count for PPT)
+ * using the appropriate Office JS API for the active host.
  */
 export function getOfficeState(): Promise<OfficeState> {
 	return new Promise((resolve) => {
-		Office.onReady((info) => {
-			// Try to get the real document name from Office context
+		Office.onReady(async (info) => {
+			const host = (info.host as unknown as string) || "Unknown";
+
 			let documentName = "Untitled";
 			try {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				const doc: any = (window as any).Office?.context?.document;
 				if (doc?.url) {
-					// Extract filename from URL path
 					try {
-						documentName = decodeURIComponent(
-							doc.url.split("/").pop() || "Untitled",
-						);
+						documentName = decodeURIComponent(doc.url.split("/").pop() || "Untitled");
 					} catch {
 						documentName = doc.url;
 					}
 				}
-			} catch {
-				// Office context not available yet
-			}
+			} catch { /* not available yet */ }
 
-			resolve({
-				app: (info.host as unknown as string) || "Unknown",
+			const state: OfficeState = {
+				app: host,
 				documentName,
 				slideCount: 0,
 				currentSlideIndex: 0,
-			});
+				paragraphCount: 0,
+				wordCount: 0,
+				sheetCount: 0,
+				activeSheetName: "",
+			};
+
+			try {
+				const hostLower = host.toLowerCase();
+				if (hostLower === "word") {
+					await new Promise<void>((res) => {
+						const Word: any = (window as any).Word;
+						if (!Word?.run) { res(); return; }
+						Word.run(async (ctx: any) => {
+							ctx.document.body.load("paragraphs/items,paragraphs/items/text");
+							await ctx.sync();
+							const paras = ctx.document.body.paragraphs;
+							state.paragraphCount = paras.items.length;
+							const allText = paras.items.map((p: any) => p.text || "").join(" ");
+							state.wordCount = allText.trim() ? allText.trim().split(/\s+/).length : 0;
+							res();
+						}).catch(() => res());
+					});
+				} else if (hostLower === "excel") {
+					await new Promise<void>((res) => {
+						const Excel: any = (window as any).Excel;
+						if (!Excel?.run) { res(); return; }
+						Excel.run(async (ctx: any) => {
+							ctx.workbook.worksheets.load("items/name");
+							ctx.workbook.worksheets.load("items");
+							const active = ctx.workbook.worksheets.getActiveWorksheet();
+							active.load("name");
+							await ctx.sync();
+							state.sheetCount = ctx.workbook.worksheets.items.length;
+							state.activeSheetName = active.name;
+							res();
+						}).catch(() => res());
+					});
+				} else if (hostLower === "powerpoint" || hostLower === "presentation") {
+					await new Promise<void>((res) => {
+						const PPT: any = (window as any).PowerPoint;
+						if (!PPT?.run) { res(); return; }
+						PPT.run(async (ctx: any) => {
+							ctx.presentation.load("slides");
+							await ctx.sync();
+							state.slideCount = ctx.presentation.slides.items?.length ?? 0;
+							res();
+						}).catch(() => res());
+					});
+				}
+			} catch { /* host API not available, fall back to zeros */ }
+
+			resolve(state);
 		});
 	});
 }

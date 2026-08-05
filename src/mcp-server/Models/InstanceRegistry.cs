@@ -38,33 +38,27 @@ public class OfficeInstance
 public class InstanceRegistry
 {
     private readonly Dictionary<string, OfficeInstance> _instances = new();
-    private int _nextInstanceId = 1;
     private readonly object _lock = new();
 
-    private static string GetHostPrefix(string appName)
-    {
-        // Normalize appName to host prefix
-        var lower = appName.ToLowerInvariant();
-        if (lower.Contains("word")) return "word_";
-        if (lower.Contains("excel")) return "excel_";
-        if (lower.Contains("outlook")) return "outlook_";
-        if (lower.Contains("powerpoint") || lower.Contains("ppt")) return "powerpoint_";
-        return "office_";
-    }
+    private static readonly System.Text.RegularExpressions.Regex _safeId =
+        new(@"^[a-z][a-z0-9_]{2,63}$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     /// <summary>
     /// Registers a new Office instance and returns its ID.
+    /// If the add-in proposes an ID (Option B stable IDs), it is used directly
+    /// after validation. Falls back to a random UUID-based ID if omitted or invalid.
+    /// Re-registration with the same ID refreshes the heartbeat in place.
     /// </summary>
-    public string RegisterInstance(string appName, string documentName)
+    public string RegisterInstance(string appName, string documentName, string? proposedId = null)
     {
         lock (_lock)
         {
-            string instanceId = $"{GetHostPrefix(appName)}{_nextInstanceId++}";
+            string instanceId = (!string.IsNullOrWhiteSpace(proposedId) && _safeId.IsMatch(proposedId))
+                ? proposedId
+                : $"office_{Guid.NewGuid():N}".Substring(0, 16);
 
-            // If this app name already exists, reuse it (update in place)
-            if (_instances.ContainsKey(instanceId))
+            if (_instances.TryGetValue(instanceId, out var existing))
             {
-                var existing = _instances[instanceId];
                 existing.AppName = appName;
                 existing.DocumentName = documentName;
                 existing.RefreshHeartbeat();
