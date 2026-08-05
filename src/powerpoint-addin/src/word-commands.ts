@@ -129,6 +129,12 @@ export async function processCommand(
 			case "word_insert_content_control":
 				result = await handleInsertContentControl(args);
 				break;
+			case "word_get_formatting":
+				result = await handleGetFormatting(args);
+				break;
+			case "word_set_formatting":
+				result = await handleSetFormatting(args);
+				break;
 			default:
 				result = { error: `Unknown Word command: ${commandName}` };
 		}
@@ -1428,6 +1434,160 @@ async function handleInsertContentControl(args: unknown): Promise<unknown> {
 			toParagraph: end,
 			inserted: true,
 			tracked: true,
+		};
+	});
+}
+
+// ── Formatting (read/write) ──────────────────────────────────────
+
+async function handleGetFormatting(args: unknown): Promise<unknown> {
+	const config = args as {
+		paragraphIndex?: number;
+		fromParagraph?: number;
+		toParagraph?: number;
+	};
+
+	const from = config.fromParagraph ?? config.paragraphIndex ?? 0;
+
+	return runInWord(async (ctx) => {
+		const paras = ctx.document.body.paragraphs;
+		paras.load("items");
+		await ctx.sync();
+
+		const total = paras.items.length;
+		const to = Math.min(config.toParagraph ?? from, total - 1);
+
+		if (from < 0 || from >= total) {
+			return { error: `paragraphIndex ${from} out of range (0–${total - 1})`, errorCode: "INVALID_PARAMETER" };
+		}
+
+		const results: unknown[] = [];
+		for (let i = from; i <= to; i++) {
+			const p = paras.items[i];
+			p.load("text,style,alignment,firstLineIndent,leftIndent,rightIndent,lineSpacing,spaceAfter,spaceBefore,outlineLevel");
+			p.font.load("name,size,bold,italic,underline,color,strikeThrough,doubleStrikeThrough,subscript,superscript,highlightColor");
+		}
+		await ctx.sync();
+
+		for (let i = from; i <= to; i++) {
+			const p = paras.items[i];
+			results.push({
+				paragraphIndex: i,
+				text: String(p.text ?? ""),
+				paragraph: {
+					style: String(p.style ?? ""),
+					alignment: String(p.alignment ?? ""),
+					firstLineIndent: p.firstLineIndent ?? 0,
+					leftIndent: p.leftIndent ?? 0,
+					rightIndent: p.rightIndent ?? 0,
+					lineSpacing: p.lineSpacing ?? null,
+					spaceBefore: p.spaceBefore ?? 0,
+					spaceAfter: p.spaceAfter ?? 0,
+					outlineLevel: p.outlineLevel ?? 0,
+				},
+				font: {
+					name: String(p.font.name ?? ""),
+					size: p.font.size ?? null,
+					bold: p.font.bold ?? false,
+					italic: p.font.italic ?? false,
+					underline: String(p.font.underline ?? "None"),
+					color: String(p.font.color ?? ""),
+					strikeThrough: p.font.strikeThrough ?? false,
+					doubleStrikeThrough: p.font.doubleStrikeThrough ?? false,
+					subscript: p.font.subscript ?? false,
+					superscript: p.font.superscript ?? false,
+					highlightColor: String(p.font.highlightColor ?? ""),
+				},
+			});
+		}
+
+		return { paragraphs: results };
+	});
+}
+
+async function handleSetFormatting(args: unknown): Promise<unknown> {
+	const config = args as {
+		paragraphIndex?: number;
+		fromParagraph?: number;
+		toParagraph?: number;
+		applyToSelection?: boolean;
+		// paragraph formatting
+		style?: string;
+		alignment?: string;
+		firstLineIndent?: number;
+		leftIndent?: number;
+		rightIndent?: number;
+		lineSpacing?: number;
+		spaceBefore?: number;
+		spaceAfter?: number;
+		// font formatting
+		fontName?: string;
+		fontSize?: number;
+		bold?: boolean;
+		italic?: boolean;
+		underline?: string;
+		color?: string;
+		strikeThrough?: boolean;
+		doubleStrikeThrough?: boolean;
+		subscript?: boolean;
+		superscript?: boolean;
+		highlightColor?: string;
+	};
+
+	return runInWord(async (ctx) => {
+		let targets: any[];
+
+		if (config.applyToSelection) {
+			const sel = ctx.document.getSelection();
+			const selParas = sel.paragraphs;
+			selParas.load("items");
+			await ctx.sync();
+			targets = selParas.items;
+		} else {
+			const paras = ctx.document.body.paragraphs;
+			paras.load("items");
+			await ctx.sync();
+
+			const total = paras.items.length;
+			const from = config.fromParagraph ?? config.paragraphIndex ?? 0;
+			const to = Math.min(config.toParagraph ?? from, total - 1);
+
+			if (from < 0 || from >= total) {
+				return { error: `paragraphIndex ${from} out of range (0–${total - 1})`, errorCode: "INVALID_PARAMETER" };
+			}
+			targets = paras.items.slice(from, to + 1);
+		}
+
+		for (const p of targets) {
+			// Paragraph-level properties
+			if (config.style !== undefined)           p.style = config.style;
+			if (config.alignment !== undefined)       p.alignment = config.alignment;
+			if (config.firstLineIndent !== undefined) p.firstLineIndent = config.firstLineIndent;
+			if (config.leftIndent !== undefined)      p.leftIndent = config.leftIndent;
+			if (config.rightIndent !== undefined)     p.rightIndent = config.rightIndent;
+			if (config.lineSpacing !== undefined)     p.lineSpacing = config.lineSpacing;
+			if (config.spaceBefore !== undefined)     p.spaceBefore = config.spaceBefore;
+			if (config.spaceAfter !== undefined)      p.spaceAfter = config.spaceAfter;
+			// Font properties
+			if (config.fontName !== undefined)           p.font.name = config.fontName;
+			if (config.fontSize !== undefined)           p.font.size = config.fontSize;
+			if (config.bold !== undefined)               p.font.bold = config.bold;
+			if (config.italic !== undefined)             p.font.italic = config.italic;
+			if (config.underline !== undefined)          p.font.underline = config.underline;
+			if (config.color !== undefined)              p.font.color = config.color;
+			if (config.strikeThrough !== undefined)      p.font.strikeThrough = config.strikeThrough;
+			if (config.doubleStrikeThrough !== undefined) p.font.doubleStrikeThrough = config.doubleStrikeThrough;
+			if (config.subscript !== undefined)          p.font.subscript = config.subscript;
+			if (config.superscript !== undefined)        p.font.superscript = config.superscript;
+			if (config.highlightColor !== undefined)     p.font.highlightColor = config.highlightColor;
+		}
+
+		await ctx.sync();
+
+		return {
+			applied: true,
+			paragraphCount: targets.length,
+			applyToSelection: config.applyToSelection ?? false,
 		};
 	});
 }

@@ -21,6 +21,8 @@ function authHeaders(): Record<string, string> {
 // --- State ---
 let instanceId: string | null = null;
 let hubConnection: signalR.HubConnection | null = null;
+let _registeredAppName: string = "Unknown";
+let _registeredDocumentName: string = "(active)";
 
 export type ConnectionState = "connected" | "reconnecting" | "fallback";
 
@@ -59,6 +61,8 @@ export async function registerWithMcp(
 	appName: string,
 	documentName: string,
 ): Promise<string> {
+	_registeredAppName = appName;
+	_registeredDocumentName = documentName;
 	const response = await fetch(`${MCP_SERVER_URL}/instances/register`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -191,7 +195,7 @@ export async function sendHeartbeat(): Promise<void> {
 		await fetch(`${MCP_SERVER_URL}/instances/${instanceId}/heartbeat`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json", ...authHeaders() },
-			body: JSON.stringify({ appName: "PowerPoint", documentName: "(active)" }),
+			body: JSON.stringify({ appName: _registeredAppName, documentName: _registeredDocumentName }),
 		});
 	} catch (error) {
 		console.warn("Heartbeat failed:", error);

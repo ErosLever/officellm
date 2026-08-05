@@ -11,12 +11,12 @@ public class McpToolEngineTests
 	}
 
     [Fact]
-    public void GetToolDefinitions_Returns107Tools()
+    public void GetToolDefinitions_Returns109Tools()
     {
         var tools = McpToolEngine.GetToolDefinitions();
 
         Assert.NotNull(tools);
-        Assert.Equal(107, tools.Length);
+        Assert.Equal(109, tools.Length);
     }
 
     [Fact]
