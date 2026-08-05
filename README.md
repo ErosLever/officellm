@@ -364,11 +364,30 @@ This fork adds compile-time token authentication across the entire server:
 
 **External MCP clients** (Claude Desktop, etc.) read the token from the platform path above (written by the server on first startup) and include it as `Authorization: Bearer <token>` — see [MCP Client Setup](#mcp-client-setup).
 
+### Stable human-readable instance IDs
+
+The upstream uses sequential numeric IDs (`word_1`, `word_2`, …) — predictable and meaningless to an LLM.
+
+This fork generates IDs client-side in the add-in before registration, using the format:
+
+```
+{host}_{docSlug}_{hash6}
+```
+
+Examples: `word_report_a3f2c1`, `excel_budget_7b9e04`, `ppt_untitled_cc1d88`
+
+- **`host`** — short host prefix (`word`, `excel`, `ppt`, `outlook`)
+- **`docSlug`** — document name, lowercased, extension stripped, non-alphanumeric collapsed to `_`, max 16 chars
+- **`hash6`** — 6-hex-char FNV-1a hash of the document file URL, stable across reloads of the same saved file. For unsaved documents a random suffix is generated once and persisted in `localStorage`, so it also survives reloads within the same session.
+
+The server validates the proposed ID against `[a-z][a-z0-9_]{2,63}` and falls back to `office_<uuid>` if it is missing or invalid. Re-registering with the same ID refreshes the heartbeat in place (no duplicate entries).
+
+**For LLM clients:** always call `office_get_active_apps` first — it returns current instance IDs with document names. Never hardcode an instance ID.
+
 ### Pending security hardening (not yet implemented)
 
 The following findings from an internal security review remain open:
 
-- **Instance ID predictability** — IDs are sequential (`word_1`, `word_2`). Should use random UUIDs.
 - **SignalR group join unauthenticated** — any connected WebSocket can join any instance group. Needs a per-instance join secret.
 - **Result injection** — `POST /instances/{id}/result` does not verify the submitter owns the command. Needs ownership check in `CompleteCommand`.
 - **`office_export_document` has no confirmation gate** — exports the full document binary with no user prompt.
