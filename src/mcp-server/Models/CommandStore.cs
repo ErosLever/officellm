@@ -11,6 +11,7 @@ public class PendingCommand
     public object? Args { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? ClaimedBy { get; set; }
+    public DateTime? ClaimedAt { get; set; }
     public bool Completed { get; set; }
     public bool Success { get; set; }
     public string? Error { get; set; }
@@ -53,16 +54,36 @@ public class CommandStore
     {
         lock (_lock)
         {
+            var staleThreshold = DateTime.UtcNow.AddSeconds(-10);
             var pending = _commands.Values
-                .Where(c => c.InstanceId == instanceId && !c.Completed && string.IsNullOrEmpty(c.ClaimedBy))
+                .Where(c => c.InstanceId == instanceId && !c.Completed &&
+                    (string.IsNullOrEmpty(c.ClaimedBy) ||
+                     (c.ClaimedAt.HasValue && c.ClaimedAt.Value < staleThreshold)))
                 .ToList();
 
             foreach (var cmd in pending)
             {
                 cmd.ClaimedBy = instanceId;
+                cmd.ClaimedAt = DateTime.UtcNow;
             }
 
             return pending;
+        }
+    }
+
+    /// <summary>
+    /// Marks a command as claimed by its instanceId (called after a successful SignalR push).
+    /// Prevents HTTP polling from picking up the same command within the stale window.
+    /// </summary>
+    public void MarkClaimed(string commandId)
+    {
+        lock (_lock)
+        {
+            if (_commands.TryGetValue(commandId, out var cmd))
+            {
+                cmd.ClaimedBy = cmd.InstanceId;
+                cmd.ClaimedAt = DateTime.UtcNow;
+            }
         }
     }
 

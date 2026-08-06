@@ -280,10 +280,17 @@ export async function pollForCommands(): Promise<PendingCommand[]> {
 	if (!instanceId) return [];
 
 	try {
-		const response = await fetch(
-			`${MCP_SERVER_URL}/instances/${instanceId}/commands`,
-			{ headers: authHeaders() },
-		);
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 5000);
+		let response: Response;
+		try {
+			response = await fetch(
+				`${MCP_SERVER_URL}/instances/${instanceId}/commands`,
+				{ headers: authHeaders(), signal: controller.signal },
+			);
+		} finally {
+			clearTimeout(timer);
+		}
 		if (!response.ok) return [];
 
 		const data = await response.json();

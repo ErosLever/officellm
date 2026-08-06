@@ -135,6 +135,27 @@ export async function processCommand(
 			case "word_set_formatting":
 				result = await handleSetFormatting(args);
 				break;
+			case "word_get_comments":
+				result = await handleGetComments(args);
+				break;
+			case "word_edit_comment":
+				result = await handleEditComment(args);
+				break;
+			case "word_resolve_comment":
+				result = await handleResolveComment(args);
+				break;
+			case "word_delete_comment":
+				result = await handleDeleteComment(args);
+				break;
+			case "word_reply_to_comment":
+				result = await handleReplyToComment(args);
+				break;
+			case "word_edit_reply":
+				result = await handleEditReply(args);
+				break;
+			case "word_delete_reply":
+				result = await handleDeleteReply(args);
+				break;
 			default:
 				result = { error: `Unknown Word command: ${commandName}` };
 		}
@@ -422,29 +443,60 @@ async function handleInsertText(args: unknown): Promise<unknown> {
 }
 
 async function handleAddComment(args: unknown): Promise<unknown> {
-	const config = args as { commentText?: string; paragraphIndex?: number };
-	const { commentText = "", paragraphIndex } = config;
+	const config = args as {
+		commentText?: string;
+		searchText?: string;
+		paragraphIndex?: number;
+		fromParagraph?: number;
+		toParagraph?: number;
+	};
+	const { commentText = "", searchText, paragraphIndex, fromParagraph, toParagraph } = config;
 
 	return runInWord(async (ctx) => {
-		if (paragraphIndex !== undefined) {
-			// Comment on a specific paragraph
+		// 1. Phrase anchor — document-wide search
+		if (searchText) {
+			const results = ctx.document.body.search(searchText, { matchCase: false });
+			results.load("items");
+			await ctx.sync();
+			if (results.items.length === 0) {
+				return { error: `Text not found: "${searchText}"`, errorCode: "NOT_FOUND" };
+			}
+			results.items[0].insertComment(commentText);
+			await ctx.sync();
+			return { commentText, searchText, added: true };
+		}
+
+		// 2. Paragraph range — fromParagraph/toParagraph (paragraphIndex is shorthand for both)
+		const paraFrom = fromParagraph ?? paragraphIndex;
+		const paraTo = toParagraph ?? paraFrom;
+
+		if (paraFrom !== undefined) {
 			const paragraphs = ctx.document.body.paragraphs;
 			paragraphs.load("items");
 			await ctx.sync();
 
-			if (paragraphIndex < 0 || paragraphIndex >= paragraphs.items.length) {
-				return { error: `Paragraph index ${paragraphIndex} out of range` };
+			const count = paragraphs.items.length;
+			if (paraFrom < 0 || paraFrom >= count) {
+				return { error: `fromParagraph ${paraFrom} out of range (0–${count - 1})` };
+			}
+			if (paraTo! < paraFrom || paraTo! >= count) {
+				return { error: `toParagraph ${paraTo} out of range (must be >= fromParagraph and < ${count})` };
 			}
 
-			const paragraph = paragraphs.items[paragraphIndex];
-			const range = paragraph.getRange("Whole");
-			range.insertComment(commentText);
+			const startRange = paragraphs.items[paraFrom].getRange("Whole");
+			if (paraTo === paraFrom) {
+				startRange.insertComment(commentText);
+			} else {
+				const endRange = paragraphs.items[paraTo!].getRange("Whole");
+				const spanRange = startRange.expandTo(endRange);
+				spanRange.insertComment(commentText);
+			}
 			await ctx.sync();
 
-			return { commentText, paragraphIndex, added: true };
+			return { commentText, fromParagraph: paraFrom, toParagraph: paraTo, added: true };
 		}
 
-		// Comment on current selection
+		// 3. Fallback — current selection
 		const selection = ctx.document.getSelection();
 		selection.insertComment(commentText);
 		await ctx.sync();
@@ -1589,5 +1641,211 @@ async function handleSetFormatting(args: unknown): Promise<unknown> {
 			paragraphCount: targets.length,
 			applyToSelection: config.applyToSelection ?? false,
 		};
+	});
+}
+
+// ── Comments ─────────────────────────────────────────────────────
+
+async function handleGetComments(args: unknown): Promise<unknown> {
+	const config = args as { includeResolved?: boolean };
+	const includeResolved = config.includeResolved ?? true;
+
+	return runInWord(async (ctx) => {
+		const comments = ctx.document.body.getComments();
+		comments.load("items");
+		await ctx.sync();
+
+		// Load scalar properties on all comments
+		for (const c of comments.items) {
+			c.load("id,content,authorName,authorEmail,creationDate,resolved");
+			c.replies.load("items");
+		}
+		await ctx.sync();
+
+		// Load reply properties
+		for (const c of comments.items) {
+			for (const r of c.replies.items) {
+				r.load("id,content,authorName,authorEmail,creationDate");
+			}
+			// Load anchor text
+			c.getRange().load("text");
+		}
+		await ctx.sync();
+
+		const result = [];
+		for (const c of comments.items) {
+			if (!includeResolved && c.resolved) continue;
+			const anchorText = (() => {
+				try { return String(c.getRange().text ?? "").slice(0, 80); }
+				catch { return ""; }
+			})();
+			result.push({
+				id: c.id,
+				author: c.authorName,
+				email: c.authorEmail,
+				date: c.creationDate,
+				text: c.content,
+				resolved: c.resolved,
+				anchorText,
+				replies: c.replies.items.map((r: any) => ({
+					id: r.id,
+					author: r.authorName,
+					email: r.authorEmail,
+					date: r.creationDate,
+					text: r.content,
+				})),
+			});
+		}
+
+		return { commentCount: result.length, comments: result };
+	});
+}
+
+async function handleEditComment(args: unknown): Promise<unknown> {
+	const config = args as { commentId?: string; text?: string };
+	const { commentId = "", text = "" } = config;
+	if (!commentId) return { error: "commentId is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const comments = ctx.document.body.getComments();
+		comments.load("items");
+		await ctx.sync();
+		for (const c of comments.items) c.load("id");
+		await ctx.sync();
+
+		const comment = comments.items.find((c: any) => c.id === commentId);
+		if (!comment) return { error: `Comment '${commentId}' not found`, errorCode: "NOT_FOUND" };
+
+		comment.content = text;
+		await ctx.sync();
+		return { commentId, updated: true };
+	});
+}
+
+async function handleResolveComment(args: unknown): Promise<unknown> {
+	const config = args as { commentId?: string; resolved?: boolean };
+	const { commentId = "", resolved = true } = config;
+	if (!commentId) return { error: "commentId is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const comments = ctx.document.body.getComments();
+		comments.load("items");
+		await ctx.sync();
+		for (const c of comments.items) c.load("id");
+		await ctx.sync();
+
+		const comment = comments.items.find((c: any) => c.id === commentId);
+		if (!comment) return { error: `Comment '${commentId}' not found`, errorCode: "NOT_FOUND" };
+
+		comment.resolved = resolved;
+		await ctx.sync();
+		return { commentId, resolved };
+	});
+}
+
+async function handleDeleteComment(args: unknown): Promise<unknown> {
+	const config = args as { commentId?: string };
+	const { commentId = "" } = config;
+	if (!commentId) return { error: "commentId is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const comments = ctx.document.body.getComments();
+		comments.load("items");
+		await ctx.sync();
+		for (const c of comments.items) c.load("id");
+		await ctx.sync();
+
+		const comment = comments.items.find((c: any) => c.id === commentId);
+		if (!comment) return { error: `Comment '${commentId}' not found`, errorCode: "NOT_FOUND" };
+
+		comment.delete();
+		await ctx.sync();
+		return { commentId, deleted: true };
+	});
+}
+
+async function handleReplyToComment(args: unknown): Promise<unknown> {
+	const config = args as { commentId?: string; text?: string };
+	const { commentId = "", text = "" } = config;
+	if (!commentId) return { error: "commentId is required", errorCode: "INVALID_PARAMETER" };
+	if (!text) return { error: "text is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const comments = ctx.document.body.getComments();
+		comments.load("items");
+		await ctx.sync();
+		for (const c of comments.items) c.load("id");
+		await ctx.sync();
+
+		const comment = comments.items.find((c: any) => c.id === commentId);
+		if (!comment) return { error: `Comment '${commentId}' not found`, errorCode: "NOT_FOUND" };
+
+		const reply = comment.reply(text);
+		await ctx.sync();
+		reply.load("id");
+		await ctx.sync();
+		return { commentId, replyId: reply.id, added: true };
+	});
+}
+
+async function handleEditReply(args: unknown): Promise<unknown> {
+	const config = args as { commentId?: string; replyId?: string; text?: string };
+	const { commentId = "", replyId = "", text = "" } = config;
+	if (!commentId) return { error: "commentId is required", errorCode: "INVALID_PARAMETER" };
+	if (!replyId) return { error: "replyId is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const comments = ctx.document.body.getComments();
+		comments.load("items");
+		await ctx.sync();
+		for (const c of comments.items) {
+			c.load("id");
+			c.replies.load("items");
+		}
+		await ctx.sync();
+
+		const comment = comments.items.find((c: any) => c.id === commentId);
+		if (!comment) return { error: `Comment '${commentId}' not found`, errorCode: "NOT_FOUND" };
+
+		for (const r of comment.replies.items) r.load("id");
+		await ctx.sync();
+
+		const reply = comment.replies.items.find((r: any) => r.id === replyId);
+		if (!reply) return { error: `Reply '${replyId}' not found`, errorCode: "NOT_FOUND" };
+
+		reply.content = text;
+		await ctx.sync();
+		return { commentId, replyId, updated: true };
+	});
+}
+
+async function handleDeleteReply(args: unknown): Promise<unknown> {
+	const config = args as { commentId?: string; replyId?: string };
+	const { commentId = "", replyId = "" } = config;
+	if (!commentId) return { error: "commentId is required", errorCode: "INVALID_PARAMETER" };
+	if (!replyId) return { error: "replyId is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const comments = ctx.document.body.getComments();
+		comments.load("items");
+		await ctx.sync();
+		for (const c of comments.items) {
+			c.load("id");
+			c.replies.load("items");
+		}
+		await ctx.sync();
+
+		const comment = comments.items.find((c: any) => c.id === commentId);
+		if (!comment) return { error: `Comment '${commentId}' not found`, errorCode: "NOT_FOUND" };
+
+		for (const r of comment.replies.items) r.load("id");
+		await ctx.sync();
+
+		const reply = comment.replies.items.find((r: any) => r.id === replyId);
+		if (!reply) return { error: `Reply '${replyId}' not found`, errorCode: "NOT_FOUND" };
+
+		reply.delete();
+		await ctx.sync();
+		return { commentId, replyId, deleted: true };
 	});
 }

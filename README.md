@@ -55,22 +55,26 @@ For **mutation tools** (`update_shape_text`, `update_speaker_notes`), step 2–4
 
 ```
 src/
-├── mcp-server/           # .NET 8 MCP server
+├── mcp-server/           # .NET MCP server
 │   ├── OfficeMcpServer.csproj
-│   ├── Program.cs        # Entry point, MCP endpoints, bridge server
+│   ├── Program.cs        # Entry point
+│   ├── AppBuilder.cs     # CORS, auth middleware, server config
 │   ├── Models/
-│   │   └── McpResponse.cs
+│   │   ├── InstanceRegistry.cs
+│   │   └── CommandStore.cs
 │   └── Tools/
-│       └── OfficeTools.cs
+│       └── McpToolEngine.cs  # 116 tool definitions + dispatch
 ├── powerpoint-addin/     # Unified Office JS Add-in (all hosts)
 │   ├── manifest.xml      # Unified manifest (Presentation + Document + Workbook + Mailbox)
 │   ├── package.json
 │   ├── webpack.config.js
 │   ├── tsconfig.json
 │   └── src/
-│       ├── index.html    # Task pane UI
-│       ├── app.ts        # Main entry point
-│       └── communication.ts # Office API wrappers + HTTP client
+│       ├── index.html        # Task pane UI (host-adaptive)
+│       ├── app.ts            # Main entry, command polling, context display
+│       ├── communication.ts  # MCP registration, heartbeat, instance ID derivation
+│       ├── word-commands.ts  # Word tool handlers (116 tools)
+│       └── globals.d.ts      # __MCP_TOKEN__ ambient declaration
 scripts/
 ├── build.sh              # Build script (all/mcp/addin/dev)
 └── dev.sh                # Development server
@@ -280,7 +284,7 @@ These are hard-won lessons from building this project. Follow them to avoid know
 
 ### MCP Server (C#)
 
-58 xUnit tests covering models, command routing, and HTTP endpoints:
+92 xUnit tests covering models, command routing, and HTTP endpoints:
 
 ```bash
 dotnet test tests/mcp-server.Tests/
@@ -383,6 +387,24 @@ Examples: `word_report_a3f2c1`, `excel_budget_7b9e04`, `ppt_untitled_cc1d88`
 The server validates the proposed ID against `[a-z][a-z0-9_]{2,63}` and falls back to `office_<uuid>` if it is missing or invalid. Re-registering with the same ID refreshes the heartbeat in place (no duplicate entries).
 
 **For LLM clients:** always call `office_get_active_apps` first — it returns current instance IDs with document names. Never hardcode an instance ID.
+
+### Word formatting and comment management (Phase 19)
+
+Seven new tools for reading and writing Word paragraph/font formatting and managing comment threads:
+
+| Tool | Description |
+|---|---|
+| `word_get_formatting` | Returns paragraph and font formatting for one or more paragraphs (style, alignment, indents, line spacing, font name/size/bold/italic/color/etc.) |
+| `word_set_formatting` | Applies any subset of paragraph and font formatting to a paragraph range or the current selection |
+| `word_get_comments` | Returns all comment threads with top-level comment metadata (id, author, date, text, resolved, anchorText) and replies |
+| `word_edit_comment` | Edits the text of an existing top-level comment |
+| `word_resolve_comment` | Resolves or reopens a comment thread |
+| `word_delete_comment` | Permanently deletes a comment thread and all its replies |
+| `word_reply_to_comment` | Adds a new reply to an existing comment thread |
+| `word_edit_reply` | Edits the text of a specific reply |
+| `word_delete_reply` | Deletes a single reply from a comment thread |
+
+Comment IDs are stable within a document session — always call `word_get_comments` first to obtain IDs before calling edit/resolve/delete tools.
 
 ### Pending security hardening (not yet implemented)
 
