@@ -17,7 +17,7 @@
 
 ```
 src/mcp-server/Tools/           # C# backend
-src/powerpoint-addin/src/       # TypeScript frontend
+src/office-addin/src/       # TypeScript frontend
 tests/mcp-server.Tests/         # C# tests
 specs/003-word-mvp/             # Feature docs
 .specify/memory/                # Constitution
@@ -67,26 +67,26 @@ specs/003-word-mvp/             # Feature docs
 
 ### Tests First
 
-- [ ] T010 [P] Add mock `changeTrackingMode` support to `src/powerpoint-addin/src/word-mock.ts` — add `changeTrackingMode` field to `MockDocumentData` interface, `changeLog` array for tracking mutations, `acceptAllChanges()` and `rejectAllChanges()` methods on `WordMock`
-- [ ] T011 [P] Add test `word_replace_text returns tracked: true` in `src/powerpoint-addin/src/word-commands.test.ts` — verify mutation result includes `tracked: true` and mock changeLog records the change
-- [ ] T012 [P] Add test `word_insert_text returns tracked: true` in `src/powerpoint-addin/src/word-commands.test.ts` — verify `tracked: true` in result
-- [ ] T013 [P] Add test `word_delete_paragraph returns tracked: true` in `src/powerpoint-addin/src/word-commands.test.ts` — verify `tracked: true` in result
-- [ ] T014 [P] Add test `word_get_tracked_changes returns mode and count` in `src/powerpoint-addin/src/word-commands.test.ts` — verify returns `changeTrackingMode`, `pendingChanges` count
-- [ ] T015 [P] Add test `word_accept_all_changes clears changeLog` in `src/powerpoint-addin/src/word-commands.test.ts` — perform mutation, accept all, verify changeLog empty
-- [ ] T016 [P] Add test `word_reject_all_changes restores original text` in `src/powerpoint-addin/src/word-commands.test.ts` — perform replace, reject all, verify paragraph text unchanged
+- [ ] T010 [P] Add mock `changeTrackingMode` support to `src/office-addin/src/word-mock.ts` — add `changeTrackingMode` field to `MockDocumentData` interface, `changeLog` array for tracking mutations, `acceptAllChanges()` and `rejectAllChanges()` methods on `WordMock`
+- [ ] T011 [P] Add test `word_replace_text returns tracked: true` in `src/office-addin/src/word-commands.test.ts` — verify mutation result includes `tracked: true` and mock changeLog records the change
+- [ ] T012 [P] Add test `word_insert_text returns tracked: true` in `src/office-addin/src/word-commands.test.ts` — verify `tracked: true` in result
+- [ ] T013 [P] Add test `word_delete_paragraph returns tracked: true` in `src/office-addin/src/word-commands.test.ts` — verify `tracked: true` in result
+- [ ] T014 [P] Add test `word_get_tracked_changes returns mode and count` in `src/office-addin/src/word-commands.test.ts` — verify returns `changeTrackingMode`, `pendingChanges` count
+- [ ] T015 [P] Add test `word_accept_all_changes clears changeLog` in `src/office-addin/src/word-commands.test.ts` — perform mutation, accept all, verify changeLog empty
+- [ ] T016 [P] Add test `word_reject_all_changes restores original text` in `src/office-addin/src/word-commands.test.ts` — perform replace, reject all, verify paragraph text unchanged
 
 ### Implementation
 
-- [ ] T017 Create `withChangeTracking<T>()` wrapper in `src/powerpoint-addin/src/word-commands.ts` — helper that saves changeTrackingMode, enables TrackMineOnly, runs mutation, restores original mode. Returns `{ tracked: true, ...result }`
-- [ ] T018 Wrap `handleReplaceText` mutation with `withChangeTracking` in `src/powerpoint-addin/src/word-commands.ts`
-- [ ] T019 [P] Wrap `handleInsertText` mutation with `withChangeTracking` in `src/powerpoint-addin/src/word-commands.ts`
-- [ ] T020 [P] Wrap `handleDeleteParagraph` mutation with `withChangeTracking` in `src/powerpoint-addin/src/word-commands.ts`
-- [ ] T021 Add `handleGetTrackedChanges` handler in `src/powerpoint-addin/src/word-commands.ts` — loads `document.changeTrackingMode`, counts pending revisions via `context.document.body.search` or mock equivalent
-- [ ] T022 [P] Add `handleAcceptAllChanges` handler in `src/powerpoint-addin/src/word-commands.ts` — calls `context.document.acceptAllChanges()` (if API available) or iterates revisions
-- [ ] T023 [P] Add `handleRejectAllChanges` handler in `src/powerpoint-addin/src/word-commands.ts` — calls `context.document.rejectAllChanges()` (if API available) or iterates revisions
-- [ ] T024 Add 3 new `case` entries to `processCommand` switch in `src/powerpoint-addin/src/word-commands.ts` — `word_get_tracked_changes`, `word_accept_all_changes`, `word_reject_all_changes`
-- [ ] T025 Run `cd src/powerpoint-addin && npm test` — verify all TS tests pass (should be ~55+)
-- [ ] T026 Run `cd src/powerpoint-addin && npx webpack --mode production` — verify build succeeds
+- [ ] T017 Create `withChangeTracking<T>()` wrapper in `src/office-addin/src/word-commands.ts` — helper that saves changeTrackingMode, enables TrackMineOnly, runs mutation, restores original mode. Returns `{ tracked: true, ...result }`
+- [ ] T018 Wrap `handleReplaceText` mutation with `withChangeTracking` in `src/office-addin/src/word-commands.ts`
+- [ ] T019 [P] Wrap `handleInsertText` mutation with `withChangeTracking` in `src/office-addin/src/word-commands.ts`
+- [ ] T020 [P] Wrap `handleDeleteParagraph` mutation with `withChangeTracking` in `src/office-addin/src/word-commands.ts`
+- [ ] T021 Add `handleGetTrackedChanges` handler in `src/office-addin/src/word-commands.ts` — loads `document.changeTrackingMode`, counts pending revisions via `context.document.body.search` or mock equivalent
+- [ ] T022 [P] Add `handleAcceptAllChanges` handler in `src/office-addin/src/word-commands.ts` — calls `context.document.acceptAllChanges()` (if API available) or iterates revisions
+- [ ] T023 [P] Add `handleRejectAllChanges` handler in `src/office-addin/src/word-commands.ts` — calls `context.document.rejectAllChanges()` (if API available) or iterates revisions
+- [ ] T024 Add 3 new `case` entries to `processCommand` switch in `src/office-addin/src/word-commands.ts` — `word_get_tracked_changes`, `word_accept_all_changes`, `word_reject_all_changes`
+- [ ] T025 Run `cd src/office-addin && npm test` — verify all TS tests pass (should be ~55+)
+- [ ] T026 Run `cd src/office-addin && npx webpack --mode production` — verify build succeeds
 
 **Checkpoint**: All Word mutations return `tracked: true`. Accept/reject tools work in mock. TS tests green. Webpack builds.
 
@@ -120,8 +120,8 @@ specs/003-word-mvp/             # Feature docs
 
 **Purpose**: Final cleanup and consistency across all hosts
 
-- [ ] T040 [P] Fix any real API differences found during manual testing — update `src/powerpoint-addin/src/word-commands.ts` and `src/powerpoint-addin/src/word-mock.ts` to match real behavior
-- [ ] T041 [P] Update `src/powerpoint-addin/src/word-mock.ts` — ensure mock `acceptAllChanges`/`rejectAllChanges` match real API behavior discovered during T037/T038
+- [ ] T040 [P] Fix any real API differences found during manual testing — update `src/office-addin/src/word-commands.ts` and `src/office-addin/src/word-mock.ts` to match real behavior
+- [ ] T041 [P] Update `src/office-addin/src/word-mock.ts` — ensure mock `acceptAllChanges`/`rejectAllChanges` match real API behavior discovered during T037/T038
 - [ ] T042 Run full test suite — `dotnet test` + `npm test` + `webpack build` — verify everything green
 - [ ] T043 Merge `003-word-mvp` branch to master — `git checkout master && git merge 003-word-mvp`
 

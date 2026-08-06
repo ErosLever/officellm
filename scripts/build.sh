@@ -29,7 +29,7 @@ build_addin() {
 	local mode="${1:-production}"
 	log "Building PowerPoint add-in ($mode)..."
 
-	cd "$PROJECT_ROOT/src/powerpoint-addin"
+	cd "$PROJECT_ROOT/src/office-addin"
 
 	# Install dependencies if needed
 	if [ ! -d "node_modules" ]; then

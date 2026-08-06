@@ -1,6 +1,6 @@
 node_modules/
 .pi/
-src/powerpoint-addin/dist/
+src/office-addin/dist/
 bin/
 obj/
 .specify/
@@ -20,4 +20,4 @@ src/mcp-server/GeneratedToken.cs
 .claude/settings.json
 
 # Generated dev manifest with hardcoded localhost URLs
-src/powerpoint-addin/manifest.dev.xml
+src/office-addin/manifest.dev.xml

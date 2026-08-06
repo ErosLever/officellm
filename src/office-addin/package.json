@@ -1,7 +1,7 @@
 {
-  "name": "office-llm-harness-powerpoint",
+  "name": "office-llm-harness-addin",
   "version": "0.1.0-spike",
-  "description": "PowerPoint add-in for Office LLM Harness - connects to local MCP server",
+  "description": "Unified Office add-in for Office LLM Harness - connects to local MCP server",
   "private": true,
   "scripts": {
     "generate-token": "node ../../scripts/generate-token.mjs",

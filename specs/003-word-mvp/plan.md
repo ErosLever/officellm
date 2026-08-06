@@ -57,7 +57,7 @@ src/
 │   │   ├── McpToolEngine.cs       # Tool definitions + dispatch (26 tools)
 │   │   └── OfficeTools.cs         # Audit logging only
 │   └── ...
-├── powerpoint-addin/              # Unified Office JS Add-in
+├── office-addin/              # Unified Office JS Add-in
 │   ├── src/
 │   │   ├── app.ts                 # Host dispatch + lifecycle
 │   │   ├── communication.ts       # MCP registration/polling/reporting

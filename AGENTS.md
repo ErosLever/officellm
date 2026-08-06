@@ -10,7 +10,7 @@ dotnet test tests/mcp-server.Tests/
 
 # Build everything first
 dotnet build src/mcp-server/
-cd src/powerpoint-addin && npx webpack --mode production
+cd src/office-addin && npx webpack --mode production
 ```
 
 If tests fail — **do not commit**. Fix the root cause, re-run, and only commit when green.
@@ -52,7 +52,7 @@ src/
 │   └── Tools/
 │       ├── OfficeTools.cs     # Tool implementations
 │       └── McpToolEngine.cs   # Tool dispatch + definitions
-├── powerpoint-addin/     # Office JS PowerPoint Add-in
+├── office-addin/     # Office JS PowerPoint Add-in
 │   ├── src/
 │   │   ├── app.ts            # Main entry point
 │   │   └── communication.ts  # MCP client (register, poll, heartbeat)
@@ -90,13 +90,13 @@ specs/                        # Speckit specifications
 dotnet build src/mcp-server/
 
 # Build PowerPoint add-in
-cd src/powerpoint-addin && npx webpack --mode production
+cd src/office-addin && npx webpack --mode production
 
 # Run tests
 dotnet test tests/mcp-server.Tests/
 
 # Full pipeline (build + test)
-dotnet build src/mcp-server/ && cd src/powerpoint-addin && npx webpack --mode production && cd ../../ && dotnet test tests/mcp-server.Tests/
+dotnet build src/mcp-server/ && cd src/office-addin && npx webpack --mode production && cd ../../ && dotnet test tests/mcp-server.Tests/
 ```
 
 ## Running the Server

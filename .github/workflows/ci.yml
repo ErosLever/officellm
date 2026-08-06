@@ -45,15 +45,15 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: src/powerpoint-addin/package-lock.json
+          cache-dependency-path: src/office-addin/package-lock.json
 
       - name: Restore add-in dependencies
         run: npm ci
-        working-directory: src/powerpoint-addin
+        working-directory: src/office-addin
 
       - name: Build PowerPoint add-in
         run: npm run build
-        working-directory: src/powerpoint-addin
+        working-directory: src/office-addin
 
   # ============================================================
   # DOCKER BUILD + PUSH (runs on push to master/main only)

@@ -16,15 +16,15 @@ cd /home/volker/git/vsto/src/mcp-server
 dotnet run
 
 # 2. In a second terminal, start the webpack dev server (port 8080)
-cd /home/volker/git/vsto/src/powerpoint-addin
+cd /home/volker/git/vsto/src/office-addin
 npx webpack serve --mode development
 
 # 3. Open PowerPoint and load the add-in
 #    → File > Options > Trust Center > Trust Center Settings > Trusted Add-in Paths
-#    → Add: /home/volker/git/vsto/src/powerpoint-addin/manifest.xml
+#    → Add: /home/volker/git/vsto/src/office-addin/manifest.xml
 #    OR
 #    → File > Add-ins > My Add-ins > Manage Add-ins > Browse
-#    → Select: /home/volker/git/vsto/src/powerpoint-addin/manifest.xml
+#    → Select: /home/volker/git/vsto/src/office-addin/manifest.xml
 ```
 
 ### Architecture
@@ -81,7 +81,7 @@ The manifest (`manifest.xml`) is configured for local development:
 ### Building for Production
 
 ```bash
-cd /home/volker/git/vsto/src/powerpoint-addin
+cd /home/volker/git/vsto/src/office-addin
 npx webpack --mode production
 ```
 

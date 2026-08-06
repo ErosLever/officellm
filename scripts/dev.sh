@@ -21,5 +21,5 @@ echo ""
 echo "Press Ctrl+C to stop."
 echo "---"
 
-cd "$PROJECT_ROOT/src/powerpoint-addin"
+cd "$PROJECT_ROOT/src/office-addin"
 npx webpack serve --mode development --host 127.0.0.1 --port 3000

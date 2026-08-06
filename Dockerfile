@@ -8,14 +8,14 @@
 FROM node:20-alpine AS addin-builder
 WORKDIR /build/addin
 
-COPY src/powerpoint-addin/package.json src/powerpoint-addin/package-lock.json ./
+COPY src/office-addin/package.json src/office-addin/package-lock.json ./
 RUN npm ci
 
-COPY src/powerpoint-addin/webpack.config.js ./
-COPY src/powerpoint-addin/tsconfig.json ./
-COPY src/powerpoint-addin/assets/ ./assets/
-COPY src/powerpoint-addin/src/ ./src/
-COPY src/powerpoint-addin/manifest.xml ./
+COPY src/office-addin/webpack.config.js ./
+COPY src/office-addin/tsconfig.json ./
+COPY src/office-addin/assets/ ./assets/
+COPY src/office-addin/src/ ./src/
+COPY src/office-addin/manifest.xml ./
 
 RUN npm run build
 
