@@ -66,6 +66,30 @@ export async function processCommand(
 			case "word_update_table_cell":
 				result = await handleUpdateTableCell(args);
 				break;
+			case "word_add_table_rows":
+				result = await handleAddTableRows(args);
+				break;
+			case "word_delete_table_row":
+				result = await handleDeleteTableRow(args);
+				break;
+			case "word_delete_table_column":
+				result = await handleDeleteTableColumn(args);
+				break;
+			case "word_add_table_column":
+				result = await handleAddTableColumn(args);
+				break;
+			case "word_merge_table_cells":
+				result = await handleMergeTableCells(args);
+				break;
+			case "word_split_table_cell":
+				result = await handleSplitTableCell(args);
+				break;
+			case "word_copy_table_structure":
+				result = await handleCopyTableStructure(args);
+				break;
+			case "word_set_table_format":
+				result = await handleSetTableFormat(args);
+				break;
 			case "word_get_headers_footers":
 				result = await handleGetHeadersFooters(args);
 				break;
@@ -741,6 +765,385 @@ async function handleUpdateTableCell(args: unknown): Promise<unknown> {
 		await ctx.sync();
 
 		return { tableIndex, row, column, text, updated: true, tracked: true };
+	});
+}
+
+// ── Word Table: Extended Operations ────────────────────────
+
+async function handleAddTableRows(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { tableIndex = 0, insertAfterRow = -1, rows, headers } = config;
+	if (!rows || !Array.isArray(rows)) return { error: "rows is required (array)", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const tables = ctx.document.body.tables;
+		tables.load("items");
+		await ctx.sync();
+		if ((tableIndex as number) >= tables.items.length)
+			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const tbl = tables.items[tableIndex as number];
+		tbl.load("rowCount,columnCount");
+		await ctx.sync();
+
+		// Normalise: array of objects → matrix
+		let matrix: string[][];
+		if (rows.length > 0 && typeof rows[0] === "object" && !Array.isArray(rows[0])) {
+			const hdrs = (headers as string[]) ?? Object.keys(rows[0] as object);
+			matrix = (rows as Record<string, unknown>[]).map(r => hdrs.map(h => String(r[h] ?? "")));
+		} else {
+			matrix = rows as string[][];
+		}
+
+		const location = (insertAfterRow as number) === -1 ? Word.InsertLocation.end : Word.InsertLocation.after;
+		if ((insertAfterRow as number) >= 0) {
+			const row = tbl.rows.getFirst();
+			tbl.rows.load("items");
+			await ctx.sync();
+			if ((insertAfterRow as number) < tbl.rows.items.length) {
+				tbl.rows.items[insertAfterRow as number].insertRows(Word.InsertLocation.after, matrix.length, matrix);
+			} else {
+				tbl.addRows(Word.InsertLocation.end, matrix.length, matrix);
+			}
+		} else {
+			tbl.addRows(Word.InsertLocation.end, matrix.length, matrix);
+		}
+		await ctx.sync();
+		return { tableIndex, rowsAdded: matrix.length };
+	});
+}
+
+async function handleDeleteTableRow(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { tableIndex = 0, rowIndex } = config;
+	if (rowIndex === undefined) return { error: "rowIndex is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const tables = ctx.document.body.tables;
+		tables.load("items");
+		await ctx.sync();
+		if ((tableIndex as number) >= tables.items.length)
+			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const tbl = tables.items[tableIndex as number];
+		tbl.load("rowCount");
+		await ctx.sync();
+		if ((rowIndex as number) >= tbl.rowCount)
+			return { error: `Row ${rowIndex} out of bounds (rowCount=${tbl.rowCount})`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		tbl.deleteRows(rowIndex as number, 1);
+		await ctx.sync();
+		return { tableIndex, rowIndex, deleted: true };
+	});
+}
+
+async function handleMergeTableCells(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { tableIndex = 0, topRow, firstColumn, bottomRow, lastColumn } = config;
+	if (topRow === undefined || firstColumn === undefined || bottomRow === undefined || lastColumn === undefined)
+		return { error: "topRow, firstColumn, bottomRow, lastColumn are required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const tables = ctx.document.body.tables;
+		tables.load("items");
+		await ctx.sync();
+		if ((tableIndex as number) >= tables.items.length)
+			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const tbl = tables.items[tableIndex as number];
+		tbl.mergeCells(topRow as number, firstColumn as number, bottomRow as number, lastColumn as number);
+		await ctx.sync();
+		return { tableIndex, merged: true };
+	});
+}
+
+async function handleSplitTableCell(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { tableIndex = 0, row, column, rowCount = 1, columnCount = 2 } = config;
+	if (row === undefined || column === undefined)
+		return { error: "row and column are required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const tables = ctx.document.body.tables;
+		tables.load("items");
+		await ctx.sync();
+		if ((tableIndex as number) >= tables.items.length)
+			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const tbl = tables.items[tableIndex as number];
+		const cell = tbl.getCell(row as number, column as number);
+		cell.split(rowCount as number, columnCount as number);
+		await ctx.sync();
+		return { tableIndex, row, column, split: true };
+	});
+}
+
+// Border helpers for add/delete column smart adjustment
+const OUTER_BORDER_LOCS = ["Top", "Bottom", "Left", "Right"] as const;
+const ALL_BORDER_LOCS = [...OUTER_BORDER_LOCS, "InsideHorizontal", "InsideVertical"] as const;
+
+async function readTableBorders(tbl: any, ctx: any): Promise<Record<string, {color: string; type: string; width: number}>> {
+	const result: Record<string, any> = {};
+	for (const loc of ALL_BORDER_LOCS) {
+		const b = tbl.getBorder(loc as any);
+		b.load("color,type,width");
+		result[loc] = b;
+	}
+	await ctx.sync();
+	return Object.fromEntries(ALL_BORDER_LOCS.map(loc => [loc, { color: result[loc].color, type: result[loc].type, width: result[loc].width }]));
+}
+
+function isOuterOnlyPattern(borders: Record<string, {type: string}>): boolean {
+	const outerSet = OUTER_BORDER_LOCS.some(l => borders[l]?.type && borders[l].type !== "None" && borders[l].type !== "Mixed");
+	const innerSet = ["InsideHorizontal","InsideVertical"].some(l => borders[l]?.type && borders[l].type !== "None" && borders[l].type !== "Mixed");
+	return outerSet && !innerSet;
+}
+
+async function applyTableBorders(tbl: any, borders: Record<string, {color: string; type: string; width: number}>, ctx: any): Promise<void> {
+	for (const [loc, props] of Object.entries(borders)) {
+		const b = tbl.getBorder(loc as any);
+		b.color = props.color;
+		b.type = props.type;
+		b.width = props.width;
+	}
+	await ctx.sync();
+}
+
+async function handleDeleteTableColumn(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { tableIndex = 0, columnIndex } = config;
+	if (columnIndex === undefined) return { error: "columnIndex is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const tables = ctx.document.body.tables;
+		tables.load("items");
+		await ctx.sync();
+		if ((tableIndex as number) >= tables.items.length)
+			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const tbl = tables.items[tableIndex as number];
+		tbl.load("rowCount,columnCount");
+		await ctx.sync();
+		const colIdx = columnIndex as number;
+		if (colIdx >= tbl.columnCount)
+			return { error: `Column ${colIdx} out of bounds (columnCount=${tbl.columnCount})`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const borders = await readTableBorders(tbl, ctx);
+		const outerOnly = isOuterOnlyPattern(borders);
+		const isFirst = colIdx === 0;
+		const isLast = colIdx === tbl.columnCount - 1;
+
+		tbl.deleteColumns(colIdx, 1);
+		await ctx.sync();
+
+		// After deletion, restore outer border on the newly-exposed outer column
+		if (outerOnly && (isFirst || isLast)) {
+			const newBorders = { ...borders };
+			if (isFirst) { newBorders["InsideVertical"] = { color: "Auto", type: "None", width: 0 }; }
+			if (isLast)  { newBorders["InsideVertical"] = { color: "Auto", type: "None", width: 0 }; }
+			await applyTableBorders(tbl, newBorders, ctx);
+		}
+
+		return { tableIndex, columnIndex: colIdx, deleted: true };
+	});
+}
+
+async function handleAddTableColumn(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { tableIndex = 0, insertBeforeColumn = -1, values, copyFormatFrom = "left" } = config;
+
+	return runInWord(async (ctx) => {
+		const tables = ctx.document.body.tables;
+		tables.load("items");
+		await ctx.sync();
+		if ((tableIndex as number) >= tables.items.length)
+			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const tbl = tables.items[tableIndex as number];
+		tbl.load("rowCount,columnCount");
+		await ctx.sync();
+
+		const borders = await readTableBorders(tbl, ctx);
+		const outerOnly = isOuterOnlyPattern(borders);
+		const colIdx = insertBeforeColumn as number;
+		const isFirst = colIdx === 0;
+		const isLast = colIdx === -1 || colIdx >= tbl.columnCount;
+		const cellValues = values ? (values as string[][]) : undefined;
+
+		if (isFirst) {
+			tbl.addColumns(Word.InsertLocation.start, 1, cellValues ?? null);
+		} else {
+			// Insert after the column before insertBeforeColumn
+			const refCol = isLast ? tbl.columnCount - 1 : colIdx - 1;
+			tbl.getCell(0, refCol).insertColumns(Word.InsertLocation.after, 1, cellValues ?? null);
+		}
+		await ctx.sync();
+
+		if (outerOnly && (isFirst || isLast)) {
+			await applyTableBorders(tbl, borders, ctx);
+		}
+
+		return { tableIndex, columnAdded: true };
+	});
+}
+
+async function handleCopyTableStructure(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { tableIndex = 0, afterParagraphIndex = -1, includeHeaders = true, emptyRows = 1 } = config;
+
+	return runInWord(async (ctx) => {
+		const tables = ctx.document.body.tables;
+		tables.load("items");
+		await ctx.sync();
+		if ((tableIndex as number) >= tables.items.length)
+			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const tbl = tables.items[tableIndex as number];
+		tbl.load("rowCount,columnCount,headerRowCount");
+		await ctx.sync();
+
+		const numCols = tbl.columnCount;
+		const headerCount = (includeHeaders && tbl.headerRowCount > 0) ? tbl.headerRowCount : 0;
+
+		// Read header cell text
+		let headerRow: string[] | undefined;
+		if (headerCount > 0) {
+			headerRow = [];
+			for (let c = 0; c < numCols; c++) {
+				const cell = tbl.getCell(0, c);
+				cell.value.load("text");
+				await ctx.sync();
+				headerRow.push(String((cell.value as any).text ?? ""));
+			}
+		}
+
+		// Read borders and cell padding
+		const borders = await readTableBorders(tbl, ctx);
+		const padLocs = ["Top","Left","Bottom","Right"] as const;
+		const padProxies = padLocs.map(l => { const p = tbl.getCellPadding(l as any); p.load("value"); return p; });
+		await ctx.sync();
+		const padding = Object.fromEntries(padLocs.map((l,i) => [l, (padProxies[i] as any).value as number]));
+
+		// Read column widths from row 0
+		const colWidths: number[] = [];
+		for (let c = 0; c < numCols; c++) {
+			const cell = tbl.getCell(0, c);
+			cell.load("columnWidth");
+			await ctx.sync();
+			colWidths.push(cell.columnWidth);
+		}
+
+		// Determine insert range
+		const body = ctx.document.body;
+		let insertRange: any;
+		if ((afterParagraphIndex as number) === -1) {
+			insertRange = body.getRange("End");
+		} else {
+			const paras = body.paragraphs;
+			paras.load("items");
+			await ctx.sync();
+			const idx = afterParagraphIndex as number;
+			insertRange = idx < paras.items.length ? paras.items[idx].getRange("After") : body.getRange("End");
+		}
+
+		const totalRows = headerCount + (emptyRows as number);
+		const newTbl = insertRange.insertTable(totalRows, numCols, Word.InsertLocation.after, headerRow ?? null);
+		await ctx.sync();
+
+		// Apply borders
+		await applyTableBorders(newTbl, borders, ctx);
+
+		// Apply padding
+		for (const [loc, val] of Object.entries(padding)) {
+			newTbl.setCellPadding(loc as any, val);
+		}
+		await ctx.sync();
+
+		// Apply column widths
+		for (let c = 0; c < numCols; c++) {
+			const cell = newTbl.getCell(0, c);
+			cell.columnWidth = colWidths[c];
+		}
+		await ctx.sync();
+
+		return { tableIndex, inserted: true, rows: totalRows, columns: numCols };
+	});
+}
+
+async function handleSetTableFormat(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { tableIndex = 0 } = config;
+
+	return runInWord(async (ctx) => {
+		const tables = ctx.document.body.tables;
+		tables.load("items");
+		await ctx.sync();
+		if ((tableIndex as number) >= tables.items.length)
+			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
+
+		const tbl = tables.items[tableIndex as number];
+		tbl.load("rowCount,columnCount,headerRowCount");
+		await ctx.sync();
+
+		const applied: string[] = [];
+
+		if (config.headerRowCount !== undefined) { tbl.headerRowCount = config.headerRowCount as number; applied.push("headerRowCount"); }
+		if (config.style !== undefined) { tbl.style = config.style as string; applied.push("style"); }
+		if (config.horizontalAlignment !== undefined) { tbl.horizontalAlignment = config.horizontalAlignment as string; applied.push("horizontalAlignment"); }
+		if (config.verticalAlignment !== undefined) { tbl.verticalAlignment = config.verticalAlignment as string; applied.push("verticalAlignment"); }
+		for (const side of ["Top","Left","Bottom","Right"] as const) {
+			const key = `cellPadding${side}`;
+			if (config[key] !== undefined) { tbl.setCellPadding(side, config[key] as number); applied.push(key); }
+		}
+
+		if (config.columnWidths !== undefined) {
+			const widths = config.columnWidths as number[];
+			for (let c = 0; c < Math.min(widths.length, tbl.columnCount); c++) {
+				tbl.getCell(0, c).columnWidth = widths[c];
+			}
+			applied.push("columnWidths");
+		}
+
+		await ctx.sync();
+
+		// Row height
+		if (config.minimumRowHeight !== undefined) {
+			const h = config.minimumRowHeight as number;
+			const rowIdx = config.rowIndex as number | undefined;
+			tbl.rows.load("items");
+			await ctx.sync();
+			const rows = rowIdx !== undefined ? [tbl.rows.items[rowIdx]] : tbl.rows.items;
+			for (const r of rows) { r.preferredHeight = h; }
+			await ctx.sync();
+			applied.push("minimumRowHeight");
+		}
+
+		// Column-level style/font
+		if (config.columnIndex !== undefined) {
+			const ci = config.columnIndex as number;
+			tbl.rows.load("items");
+			await ctx.sync();
+			for (const r of tbl.rows.items) {
+				if (ci >= tbl.columnCount) continue;
+				r.cells.load("items");
+				await ctx.sync();
+				const targetCell = r.cells.items[ci];
+				if (!targetCell) continue;
+				const isHdr = r.isHeader;
+				const styleName = isHdr
+					? (config.headerStyle ?? config.paragraphStyle) as string | undefined
+					: config.paragraphStyle as string | undefined;
+				if (styleName) { targetCell.value.style = styleName; }
+				if (config.bold !== undefined) targetCell.value.font.bold = config.bold as boolean;
+				if (config.italic !== undefined) targetCell.value.font.italic = config.italic as boolean;
+				if (config.color !== undefined) targetCell.value.font.color = config.color as string;
+				if (config.alignment !== undefined) targetCell.value.paragraphs.getFirst().alignment = config.alignment as string;
+			}
+			await ctx.sync();
+			applied.push("columnFormatting");
+		}
+
+		return { tableIndex, formatted: true, applied };
 	});
 }
 
