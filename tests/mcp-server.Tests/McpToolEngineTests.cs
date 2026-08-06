@@ -11,12 +11,12 @@ public class McpToolEngineTests
 	}
 
     [Fact]
-    public void GetToolDefinitions_Returns116Tools()
+    public void GetToolDefinitions_Returns120Tools()
     {
         var tools = McpToolEngine.GetToolDefinitions();
 
         Assert.NotNull(tools);
-        Assert.Equal(116, tools.Length);
+        Assert.Equal(120, tools.Length);
     }
 
     [Fact]
@@ -167,6 +167,12 @@ public class McpToolEngineTests
         Assert.Contains("excel_unprotect_sheet", names);
         Assert.Contains("excel_set_page_layout", names);
         Assert.Contains("excel_get_page_layout", names);
+
+        // Style management
+        Assert.Contains("word_get_styles", names);
+        Assert.Contains("word_modify_style", names);
+        Assert.Contains("word_create_style", names);
+        Assert.Contains("word_create_and_remap_style", names);
     }
 
     [Fact]

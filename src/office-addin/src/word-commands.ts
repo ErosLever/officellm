@@ -156,6 +156,18 @@ export async function processCommand(
 			case "word_delete_reply":
 				result = await handleDeleteReply(args);
 				break;
+			case "word_get_styles":
+				result = await handleGetStyles(args);
+				break;
+			case "word_modify_style":
+				result = await handleModifyStyle(args);
+				break;
+			case "word_create_style":
+				result = await handleCreateStyle(args);
+				break;
+			case "word_create_and_remap_style":
+				result = await handleCreateAndRemapStyle(args);
+				break;
 			default:
 				result = { error: `Unknown Word command: ${commandName}` };
 		}
@@ -164,13 +176,23 @@ export async function processCommand(
 			success = false;
 		}
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		console.error(`Word command ${commandId} failed:`, errorMessage);
+		let errorMessage: string;
+		try {
+			const e = error as any;
+			const di = e?.debugInfo;
+			errorMessage = di?.message || di?.errorLocation || JSON.stringify(di) || e?.message || e?.code || JSON.stringify(e) || String(error);
+		} catch {
+			errorMessage = String(error);
+		}
+		console.error(`Word command ${commandId} failed:`, JSON.stringify(error), error);
 		success = false;
 		result = { error: errorMessage };
 	}
 
-	await reportResult(commandId, success, undefined, result);
+	const errorStr = (!success && result && typeof result === "object" && "error" in result)
+		? (result as any).error as string
+		: undefined;
+	await reportResult(commandId, success, errorStr, result);
 	return result;
 }
 
@@ -910,10 +932,40 @@ async function handleInsertImage(args: unknown): Promise<unknown> {
 // ── Word Structure: Styles & Lists ──────────────────────────
 
 async function handleApplyStyle(args: unknown): Promise<unknown> {
-	const config = args as { paragraphIndex?: number; styleName?: string };
-	const { paragraphIndex = 0, styleName = "" } = config;
+	const config = args as {
+		paragraphIndex?: number;
+		styleName?: string;
+		characterStyle?: string;
+		searchText?: string;
+		applyToSelection?: boolean;
+	};
+	const { paragraphIndex = 0, styleName, characterStyle, searchText, applyToSelection } = config;
+
+	// Character style path
+	if (characterStyle) {
+		return runInWord(async (ctx) => {
+			let range: any;
+			if (searchText) {
+				const results = ctx.document.body.search(searchText, { matchCase: false });
+				results.load("items");
+				await ctx.sync();
+				if (results.items.length === 0)
+					return { error: `Text not found: "${searchText}"`, errorCode: "NOT_FOUND" };
+				range = results.items[0];
+			} else if (applyToSelection) {
+				range = ctx.document.getSelection();
+			} else {
+				return { error: "characterStyle requires searchText or applyToSelection:true", errorCode: "INVALID_PARAMETER" };
+			}
+			range.style = characterStyle;
+			await ctx.sync();
+			return { characterStyle, searchText: searchText ?? null, applyToSelection: applyToSelection ?? false, applied: true };
+		});
+	}
+
+	// Paragraph style path
 	if (!styleName)
-		return { error: "styleName is required", errorCode: "INVALID_PARAMETER" };
+		return { error: "styleName or characterStyle is required", errorCode: "INVALID_PARAMETER" };
 
 	return runInWord(async (ctx) => {
 		const paras = ctx.document.body.paragraphs;
@@ -1847,5 +1899,184 @@ async function handleDeleteReply(args: unknown): Promise<unknown> {
 		reply.delete();
 		await ctx.sync();
 		return { commentId, replyId, deleted: true };
+	});
+}
+
+// ── Styles ────────────────────────────────────────────────────────
+
+function applyFontPropsToStyle(styleFont: any, cfg: Record<string, unknown>): void {
+	if (cfg.fontName !== undefined)           styleFont.name = cfg.fontName;
+	if (cfg.fontSize !== undefined)           styleFont.size = cfg.fontSize;
+	if (cfg.bold !== undefined)               styleFont.bold = cfg.bold;
+	if (cfg.italic !== undefined)             styleFont.italic = cfg.italic;
+	if (cfg.underline !== undefined)          styleFont.underline = cfg.underline;
+	if (cfg.color !== undefined)              styleFont.color = cfg.color;
+	if (cfg.strikeThrough !== undefined)      styleFont.strikeThrough = cfg.strikeThrough;
+	if (cfg.doubleStrikeThrough !== undefined) styleFont.doubleStrikeThrough = cfg.doubleStrikeThrough;
+	if (cfg.subscript !== undefined)          styleFont.subscript = cfg.subscript;
+	if (cfg.superscript !== undefined)        styleFont.superscript = cfg.superscript;
+}
+
+function applyParaPropsToStyle(stylePF: any, cfg: Record<string, unknown>): void {
+	if (cfg.alignment !== undefined)       stylePF.alignment = cfg.alignment;
+	if (cfg.firstLineIndent !== undefined) stylePF.firstLineIndent = cfg.firstLineIndent;
+	if (cfg.leftIndent !== undefined)      stylePF.leftIndent = cfg.leftIndent;
+	if (cfg.rightIndent !== undefined)     stylePF.rightIndent = cfg.rightIndent;
+	if (cfg.lineSpacing !== undefined)     stylePF.lineSpacing = cfg.lineSpacing;
+	if (cfg.spaceBefore !== undefined)     stylePF.spaceBeforeParagraph = cfg.spaceBefore;
+	if (cfg.spaceAfter !== undefined)      stylePF.spaceAfterParagraph = cfg.spaceAfter;
+}
+
+async function handleGetStyles(args: unknown): Promise<unknown> {
+	const config = args as { type?: string; inUseOnly?: boolean };
+	const { type, inUseOnly = false } = config;
+
+	return runInWord(async (ctx) => {
+		const styles = ctx.document.getStyles();
+		styles.load("items");
+		await ctx.sync();
+
+		for (const s of styles.items) {
+			s.load("name,nameLocal,type,builtIn,inUse,styleId");
+			s.font.load("name,size,bold,italic,underline,color,strikeThrough,doubleStrikeThrough,subscript,superscript");
+			try { s.paragraphFormat.load("alignment,firstLineIndent,leftIndent,rightIndent,lineSpacing,spaceBeforeParagraph,spaceAfterParagraph"); }
+			catch { /* paragraphFormat not available for character styles */ }
+		}
+		await ctx.sync();
+
+		const result = [];
+		for (const s of styles.items) {
+			if (inUseOnly && !s.inUse) continue;
+			const styleName = (s as any).name || (s as any).nameLocal || "";
+			const styleType = (s as any).type || "";
+			if (type && styleType.toLowerCase() !== type.toLowerCase()) continue;
+
+			const entry: Record<string, unknown> = {
+				name: styleName,
+				styleId: (s as any).styleId,
+				type: styleType,
+				builtIn: s.builtIn,
+				inUse: s.inUse,
+				font: {
+					name: s.font.name,
+					size: s.font.size,
+					bold: s.font.bold,
+					italic: s.font.italic,
+					underline: s.font.underline,
+					color: s.font.color,
+					strikeThrough: s.font.strikeThrough,
+					doubleStrikeThrough: s.font.doubleStrikeThrough,
+					subscript: s.font.subscript,
+					superscript: s.font.superscript,
+				},
+			};
+			try {
+				entry.paragraphFormat = {
+					alignment: s.paragraphFormat.alignment,
+					firstLineIndent: s.paragraphFormat.firstLineIndent,
+					leftIndent: s.paragraphFormat.leftIndent,
+					rightIndent: s.paragraphFormat.rightIndent,
+					lineSpacing: s.paragraphFormat.lineSpacing,
+					spaceBefore: s.paragraphFormat.spaceBeforeParagraph,
+					spaceAfter: s.paragraphFormat.spaceAfterParagraph,
+				};
+			} catch { /* character styles have no paragraphFormat */ }
+			result.push(entry);
+		}
+
+		return { styleCount: result.length, styles: result };
+	});
+}
+
+async function handleModifyStyle(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { styleName } = config;
+	if (!styleName || typeof styleName !== "string")
+		return { error: "styleName is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		const styles = ctx.document.getStyles();
+		styles.load("items");
+		await ctx.sync();
+		for (const s of styles.items) s.load("name,nameLocal");
+		await ctx.sync();
+
+		const style = styles.items.find((s: any) => (s.name || s.nameLocal) === styleName);
+		if (!style) return { error: `Style '${styleName}' not found`, errorCode: "NOT_FOUND" };
+
+		applyFontPropsToStyle(style.font, config);
+		try { applyParaPropsToStyle(style.paragraphFormat, config); }
+		catch { /* character style — no paragraphFormat */ }
+
+		await ctx.sync();
+		return { styleName, modified: true };
+	});
+}
+
+async function handleCreateStyle(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { styleName, styleType = "Paragraph", baseStyle } = config;
+	if (!styleName || typeof styleName !== "string")
+		return { error: "styleName is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		let style: any;
+		try {
+			style = ctx.document.addStyle(styleName as string, styleType as string);
+		} catch (e) {
+			return { error: `Could not create style: ${e instanceof Error ? e.message : String(e)}`, errorCode: "HOST_NOT_AVAILABLE" };
+		}
+
+		if (baseStyle && typeof baseStyle === "string") {
+			try { style.baseStyle = baseStyle; } catch { /* ignore if base style not found */ }
+		}
+
+		applyFontPropsToStyle(style.font, config);
+		try { applyParaPropsToStyle(style.paragraphFormat, config); }
+		catch { /* character style — no paragraphFormat */ }
+
+		await ctx.sync();
+		return { styleName, styleType, baseStyle: baseStyle ?? null, created: true };
+	});
+}
+
+async function handleCreateAndRemapStyle(args: unknown): Promise<unknown> {
+	const config = args as Record<string, unknown>;
+	const { baseStyleName, newStyleName } = config;
+	if (!baseStyleName || typeof baseStyleName !== "string")
+		return { error: "baseStyleName is required", errorCode: "INVALID_PARAMETER" };
+	if (!newStyleName || typeof newStyleName !== "string")
+		return { error: "newStyleName is required", errorCode: "INVALID_PARAMETER" };
+
+	return runInWord(async (ctx) => {
+		// Create new style inheriting from base
+		const newStyle: any = ctx.document.addStyle(newStyleName, "Paragraph");
+		newStyle.baseStyle = baseStyleName;
+		applyFontPropsToStyle(newStyle.font, config);
+		try { applyParaPropsToStyle(newStyle.paragraphFormat, config); } catch { /* ignore */ }
+		try {
+			await ctx.sync();
+		} catch (e) {
+			const msg = (e as any)?.debugInfo?.message || (e instanceof Error ? e.message : String(e));
+			return { error: `Could not create style '${newStyleName}': ${msg}`, errorCode: "HOST_NOT_AVAILABLE" };
+		}
+
+		// Remap all paragraphs that use baseStyleName to the new style
+		const paragraphs = ctx.document.body.paragraphs;
+		paragraphs.load("items");
+		await ctx.sync();
+		for (const p of paragraphs.items) p.load("style");
+		await ctx.sync();
+
+		let remapped = 0;
+		for (const p of paragraphs.items) {
+			if (p.style === baseStyleName) {
+				p.style = newStyleName;
+				remapped++;
+			}
+		}
+		await ctx.sync();
+
+		return { newStyleName, baseStyleName, remapped };
 	});
 }
