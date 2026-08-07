@@ -51,6 +51,8 @@ For **mutation tools** (`update_shape_text`, `update_speaker_notes`), step 2–4
 | **Unified Office Add-in** | TypeScript/HTML | Single Office JS Add-in that auto-detects host (Word/Excel/PowerPoint/Outlook) via `Office.onReady()`. One manifest for all hosts.        |
 | **Express Server**        | Node.js         | Serves static add-in files + dynamic `manifest.xml` (URLs from Host header). Docker/K8s deployment.                                       |
 
+See [TOOLS.md](TOOLS.md) for the full list of all 129 MCP tools, organized by host application (Word/Excel/PowerPoint/Outlook) and category, with a one-line description of each.
+
 ## Project Structure
 
 ```
