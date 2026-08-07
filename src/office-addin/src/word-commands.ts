@@ -192,6 +192,9 @@ export async function processCommand(
 			case "word_create_and_remap_style":
 				result = await handleCreateAndRemapStyle(args);
 				break;
+			case "word_get_image":
+				result = await handleGetImage(args);
+				break;
 			default:
 				result = { error: `Unknown Word command: ${commandName}` };
 		}
@@ -1333,6 +1336,38 @@ async function handleInsertImage(args: unknown): Promise<unknown> {
 			inserted: true,
 			width: image.width,
 			height: image.height,
+		};
+	});
+}
+
+async function handleGetImage(args: unknown): Promise<unknown> {
+	const config = args as { imageIndex?: number };
+	const imageIndex = config.imageIndex ?? 0;
+
+	return runInWord(async (ctx) => {
+		const pictures = ctx.document.body.inlinePictures;
+		pictures.load("items");
+		await ctx.sync();
+
+		if (imageIndex < 0 || imageIndex >= pictures.items.length) {
+			return {
+				error: `Image index ${imageIndex} out of range. Document has ${pictures.items.length} inline image(s).`,
+			};
+		}
+
+		const picture = pictures.items[imageIndex];
+		picture.load("width,height,imageFormat");
+		const imageResult = picture.getBase64ImageSrc();
+		await ctx.sync();
+
+		const format = String(picture.imageFormat || "Png").toLowerCase();
+
+		return {
+			imageIndex,
+			imageCount: pictures.items.length,
+			displayWidth: picture.width,
+			displayHeight: picture.height,
+			image: `data:image/${format};base64,${imageResult.value}`,
 		};
 	});
 }

@@ -11,6 +11,13 @@ export interface MockParagraphData {
 	uniqueLocalId?: string;
 }
 
+export interface MockInlinePictureData {
+	base64: string;
+	width: number;
+	height: number;
+	imageFormat?: string;
+}
+
 export interface MockDocumentData {
 	paragraphs: MockParagraphData[];
 	selectedText?: string;
@@ -22,6 +29,7 @@ export interface MockDocumentData {
 		oldText?: string;
 		newText?: string;
 	}>;
+	inlinePictures?: MockInlinePictureData[];
 }
 
 export class WordMock {
@@ -196,11 +204,13 @@ class MockBody {
 	private _ctx: WordMockContext;
 	private _data: MockDocumentData;
 	paragraphs: MockParagraphCollection;
+	inlinePictures: MockInlinePictureCollection;
 
 	constructor(ctx: WordMockContext, data: MockDocumentData) {
 		this._ctx = ctx;
 		this._data = data;
 		this.paragraphs = new MockParagraphCollection(ctx, data);
+		this.inlinePictures = new MockInlinePictureCollection(ctx, data);
 	}
 
 	insertParagraph(text: string, location: string) {
@@ -223,6 +233,52 @@ class MockBody {
 
 	search(searchText: string, options: any) {
 		return new MockSearchResults(this._ctx, this._data, searchText, options);
+	}
+}
+
+// ── Mock Inline Picture Collection ──────────────────────────────
+
+class MockInlinePictureCollection {
+	private _ctx: WordMockContext;
+	items: MockInlinePicture[];
+
+	constructor(ctx: WordMockContext, data: MockDocumentData) {
+		this._ctx = ctx;
+		this.items = (data.inlinePictures ?? []).map((p) => new MockInlinePicture(p));
+	}
+
+	load(_props: string) {
+		this._ctx.queueLoad(this, []);
+	}
+
+	_populate(_props: string[]) {
+		/* items already populated */
+	}
+}
+
+class MockInlinePicture {
+	private _pic: MockInlinePictureData;
+
+	constructor(pic: MockInlinePictureData) {
+		this._pic = pic;
+	}
+
+	get width() {
+		return this._pic.width;
+	}
+	get height() {
+		return this._pic.height;
+	}
+	get imageFormat() {
+		return this._pic.imageFormat ?? "Png";
+	}
+
+	load(_props: string) {
+		/* already populated */
+	}
+
+	getBase64ImageSrc() {
+		return { value: this._pic.base64 };
 	}
 }
 

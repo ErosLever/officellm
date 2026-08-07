@@ -391,6 +391,42 @@ describe("word_reject_all_changes", () => {
 	});
 });
 
+describe("word_get_image", () => {
+	beforeEach(() => {
+		mock.data.inlinePictures = [
+			{ base64: "aaa111", width: 100, height: 200, imageFormat: "Png" },
+			{ base64: "bbb222", width: 50, height: 75, imageFormat: "Jpeg" },
+		];
+	});
+
+	it("returns the image at the given index as a data URL", async () => {
+		const result = (await processCommand("c28", "word_get_image", {
+			imageIndex: 1,
+		})) as any;
+
+		expect(result.imageIndex).toBe(1);
+		expect(result.imageCount).toBe(2);
+		expect(result.displayWidth).toBe(50);
+		expect(result.displayHeight).toBe(75);
+		expect(result.image).toBe("data:image/jpeg;base64,bbb222");
+	});
+
+	it("defaults to imageIndex 0", async () => {
+		const result = (await processCommand("c29", "word_get_image", {})) as any;
+
+		expect(result.imageIndex).toBe(0);
+		expect(result.image).toBe("data:image/png;base64,aaa111");
+	});
+
+	it("returns an error when imageIndex is out of range", async () => {
+		const result = (await processCommand("c30", "word_get_image", {
+			imageIndex: 5,
+		})) as any;
+
+		expect(result.error).toContain("out of range");
+	});
+});
+
 // ── ERROR HANDLING ───────────────────────────────────────────────
 
 describe("unknown command", () => {

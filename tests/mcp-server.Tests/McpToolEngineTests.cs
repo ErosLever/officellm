@@ -11,12 +11,12 @@ public class McpToolEngineTests
 	}
 
     [Fact]
-    public void GetToolDefinitions_Returns128Tools()
+    public void GetToolDefinitions_Returns129Tools()
     {
         var tools = McpToolEngine.GetToolDefinitions();
 
         Assert.NotNull(tools);
-        Assert.Equal(128, tools.Length);
+        Assert.Equal(129, tools.Length);
     }
 
     [Fact]
@@ -173,6 +173,7 @@ public class McpToolEngineTests
         Assert.Contains("word_modify_style", names);
         Assert.Contains("word_create_style", names);
         Assert.Contains("word_create_and_remap_style", names);
+        Assert.Contains("word_get_image", names);
         Assert.Contains("word_add_table_rows", names);
         Assert.Contains("word_delete_table_row", names);
         Assert.Contains("word_delete_table_column", names);
