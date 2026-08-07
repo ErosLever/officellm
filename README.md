@@ -63,7 +63,7 @@ src/
 │   │   ├── InstanceRegistry.cs
 │   │   └── CommandStore.cs
 │   └── Tools/
-│       └── McpToolEngine.cs  # 116 tool definitions + dispatch
+│       └── McpToolEngine.cs  # 129 tool definitions + dispatch
 ├── office-addin/     # Unified Office JS Add-in (all hosts)
 │   ├── manifest.xml      # Unified manifest (Presentation + Document + Workbook + Mailbox)
 │   ├── package.json
@@ -73,7 +73,7 @@ src/
 │       ├── index.html        # Task pane UI (host-adaptive)
 │       ├── app.ts            # Main entry, command polling, context display
 │       ├── communication.ts  # MCP registration, heartbeat, instance ID derivation
-│       ├── word-commands.ts  # Word tool handlers (116 tools)
+│       ├── word-commands.ts  # Word tool handlers (129 tools)
 │       └── globals.d.ts      # __MCP_TOKEN__ ambient declaration
 scripts/
 ├── build.sh              # Build script (all/mcp/addin/dev)
@@ -406,6 +406,52 @@ Seven new tools for reading and writing Word paragraph/font formatting and manag
 
 Comment IDs are stable within a document session — always call `word_get_comments` first to obtain IDs before calling edit/resolve/delete tools.
 
+### Word table management tools
+
+Eight new tools for structural editing and formatting of Word tables, extending the original three (`word_get_tables`, `word_insert_table`, `word_update_table_cell`):
+
+| Tool | Description |
+|---|---|
+| `word_add_table_rows` | Adds one or more rows, as a matrix or as objects mapped via a `headers` array |
+| `word_delete_table_row` | Deletes a row by index |
+| `word_add_table_column` | Adds a column; auto-adjusts outer borders if the table uses an outer-border-only pattern |
+| `word_delete_table_column` | Deletes a column with the same border adjustment |
+| `word_merge_table_cells` | Merges a rectangular cell range |
+| `word_split_table_cell` | Splits a cell into a rowCount × columnCount grid |
+| `word_copy_table_structure` | Clones a table's column count, borders, padding, and column widths into a new empty table |
+| `word_set_table_format` | Sets header row count, table style, alignment, cell padding, column widths, row height, and per-column paragraph/font overrides — all parameters optional |
+
+### Word style management tools
+
+Four tools for inspecting and defining named styles:
+
+| Tool | Description |
+|---|---|
+| `word_get_styles` | Returns all styles with font/paragraph properties; filterable by type or `inUseOnly` |
+| `word_modify_style` | Updates an existing style's definition document-wide |
+| `word_create_style` | Creates a new named style, optionally inheriting from a base style |
+| `word_create_and_remap_style` | Clones a style with overrides and remaps existing paragraphs from the base style to the new one — useful for customizing a built-in style (e.g. `Heading 1`) without altering its definition |
+
+Note: list numbering cannot be baked into styles via Office JS on macOS.
+
+### word_get_image — visual analysis of inline images
+
+Retrieves an inline image from a Word document as a base64 data URL so an LLM can inspect it visually. Indexed by position among the document's inline images (0-based); only inline images are supported — floating pictures, text boxes, and other floating shapes have no equivalent export method in the Word JS API.
+
+**Cropping caveat:** the Word JS API exposes no crop information for inline pictures, so the returned image is always the full original picture as stored in the document, even if the user cropped it in Word — it may show more than what's visible. The response includes `displayWidth`/`displayHeight` (the visible frame's dimensions); compare their aspect ratio to the returned image's actual pixel aspect ratio to detect a mismatch, which indicates the picture has been cropped.
+
+### SSE transport compatibility
+
+Added a legacy Server-Sent Events transport (`GET /sse` + `POST /mcp?sessionId=<id>`) alongside the Streamable HTTP transport, for MCP clients that only support the older SSE-based protocol (e.g. Claude Desktop ≤ 0.7). The SSE handler opens a stream, emits an `endpoint` event with the session-scoped POST path, then forwards all JSON-RPC responses for that session over the stream instead of the HTTP response body.
+
+### word_search fix
+
+`word_search` now returns each match's `paragraphIndex` and a short context snippet (marked with `[brackets]` around the match), instead of just raw match text — fixing a regression where results could contain duplicate or fabricated matches.
+
+### Relicensing (MIT)
+
+The upstream repository has no license file. With the original author's written permission, this fork is relicensed under the MIT License — see [LICENSE.md](LICENSE.md).
+
 ### Pending security hardening (not yet implemented)
 
 The following findings from an internal security review remain open:
@@ -417,4 +463,6 @@ The following findings from an internal security review remain open:
 
 ## License
 
-Private / Internal Use Only
+MIT — see [LICENSE.md](LICENSE.md).
+
+The upstream [volkermauel/officellm](https://github.com/volkermauel/officellm) has no license file. The original author granted written permission to relicense this fork under the MIT License.
