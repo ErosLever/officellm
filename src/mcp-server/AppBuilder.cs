@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.FileProviders;
@@ -15,6 +17,9 @@ namespace OfficeMcpServer;
 /// </summary>
 public static class AppBuilder
 {
+    // SSE sessions: sessionId → channel used to push JSON-RPC responses back to the client
+    private static readonly ConcurrentDictionary<string, Channel<string>> _sseSessions = new();
+
     /// <summary>
     /// Creates a pre-configured WebApplication. The caller must call app.Run() to start it.
     /// For testing, pass mcpHost=null and mcpPort=null to use ASP.NET's default URL mechanism.
@@ -248,15 +253,32 @@ public static class AppBuilder
             if (string.IsNullOrWhiteSpace(json))
                 return Results.BadRequest("Empty request body");
 
+            // SSE session: if ?sessionId= present, push response into SSE stream
+            string? sessionId = context.Request.Query["sessionId"].FirstOrDefault();
+            Channel<string>? sseChannel = null;
+            if (sessionId != null)
+                _sseSessions.TryGetValue(sessionId, out sseChannel);
+
+            async Task<IResult> SendResponse(object responseObj)
+            {
+                if (sseChannel != null)
+                {
+                    var serialized = JsonSerializer.Serialize(responseObj);
+                    await sseChannel.Writer.WriteAsync(serialized);
+                    return Results.Accepted();
+                }
+                return Results.Json(responseObj, new JsonSerializerOptions { WriteIndented = true });
+            }
+
             try
             {
-                var message = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json);
+                var message = JsonSerializer.Deserialize<JsonElement>(json);
                 string method = message.GetProperty("method").GetString() ?? "";
 
                 switch (method)
                 {
                     case "initialize":
-                        return Results.Json(new
+                        return await SendResponse(new
                         {
                             jsonrpc = "2.0", id = message.GetProperty("id"),
                             result = new
@@ -265,26 +287,25 @@ public static class AppBuilder
                                 serverInfo = new { name = "OfficeMcpServer", version = "0.1.0-spike" },
                                 capabilities = new { tools = new { listChanged = true } }
                             }
-                        }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                        });
 
                     case "notifications/initialized":
-                        return Results.Json(new { jsonrpc = "2.0", result = (object?)null });
+                        // Notifications have no id and expect no response
+                        return Results.Accepted();
 
                     case "tools/list":
                         var tools = McpToolEngine.GetToolDefinitions();
-                        return Results.Json(new
-                        { jsonrpc = "2.0", id = message.GetProperty("id"), result = new { tools } },
-                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                        return await SendResponse(new
+                        { jsonrpc = "2.0", id = message.GetProperty("id"), result = new { tools } });
 
                     case "tools/call":
                         var toolName = message.GetProperty("params").GetProperty("name").GetString() ?? "";
-                        System.Text.Json.JsonElement? toolArgs = null;
+                        JsonElement? toolArgs = null;
                         if (message.GetProperty("params").TryGetProperty("arguments", out var arguments))
                             toolArgs = arguments;
                         var result = await McpToolEngine.ExecuteTool(toolName, toolArgs);
-                        return Results.Json(new
-                        { jsonrpc = "2.0", id = message.GetProperty("id"), result },
-                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                        return await SendResponse(new
+                        { jsonrpc = "2.0", id = message.GetProperty("id"), result });
 
                     default:
                         return Results.Problem(detail: $"Method not found: {method}", statusCode: StatusCodes.Status404NotFound);
@@ -304,6 +325,45 @@ public static class AppBuilder
         {
             var activeCount = registry.GetActiveInstances().Count;
             return Results.Json(new { status = "ok", activeInstances = activeCount });
+        });
+
+        // ============================================================
+        // SSE TRANSPORT  (legacy MCP clients: Claude Desktop ≤ 0.7)
+        // GET /sse  — opens a text/event-stream, emits one "endpoint" event,
+        // then forwards all JSON-RPC responses for this session.
+        // POST /mcp?sessionId=<id> — same handler as below, writes response
+        // into the SSE channel instead of the HTTP response.
+        // ============================================================
+
+        app.MapGet("/sse", async (HttpContext context) =>
+        {
+            var sessionId = Guid.NewGuid().ToString("N");
+            var channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+            _sseSessions[sessionId] = channel;
+
+            context.Response.Headers["Content-Type"] = "text/event-stream";
+            context.Response.Headers["Cache-Control"] = "no-cache";
+            context.Response.Headers["X-Accel-Buffering"] = "no";
+
+            // Send the endpoint event so the client knows where to POST
+            var postPath = $"/mcp?sessionId={sessionId}";
+            await context.Response.WriteAsync($"event: endpoint\ndata: {postPath}\n\n");
+            await context.Response.Body.FlushAsync();
+
+            var ct = context.RequestAborted;
+            try
+            {
+                await foreach (var msg in channel.Reader.ReadAllAsync(ct))
+                {
+                    await context.Response.WriteAsync($"event: message\ndata: {msg}\n\n", ct);
+                    await context.Response.Body.FlushAsync(ct);
+                }
+            }
+            catch (OperationCanceledException) { }
+            finally
+            {
+                _sseSessions.TryRemove(sessionId, out _);
+            }
         });
 
         // ============================================================
