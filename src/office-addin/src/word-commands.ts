@@ -364,41 +364,46 @@ async function handleGetSelection(_args: unknown): Promise<unknown> {
 }
 
 async function handleSearch(args: unknown): Promise<unknown> {
-	const config = args as { searchText?: string; matchCase?: boolean };
+	const config = args as { searchText?: string; matchCase?: boolean; snippetRadius?: number };
 	const searchText = config.searchText ?? "";
 	const matchCase = config.matchCase ?? false;
+	const snippetRadius = config.snippetRadius ?? 60;
 
 	if (!searchText) return { error: "searchText is required" };
 
+	const escaped = searchText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const re = new RegExp(escaped, matchCase ? "g" : "gi");
+
 	return runInWord(async (ctx) => {
-		const searchResults = ctx.document.body.search(searchText, { matchCase });
-		searchResults.load("items");
+		// Scan our own loaded paragraph text rather than Word's body.search(),
+		// which can return duplicate/corrupted ranges from hidden field-code
+		// runs (content controls, mail-merge fields, cross-references).
+		const paragraphs = ctx.document.body.paragraphs;
+		paragraphs.load("items");
 		await ctx.sync();
 
-		const results: Array<{ index: number; text: string; matchText: string }> =
-			[];
-
-		// Load parent paragraphs for context
-		for (let i = 0; i < searchResults.items.length; i++) {
-			const range = searchResults.items[i];
-			range.load("text");
-		}
+		for (const p of paragraphs.items) p.load("text");
 		await ctx.sync();
 
-		for (let i = 0; i < searchResults.items.length; i++) {
-			const range = searchResults.items[i];
-			results.push({
-				index: i,
-				text: String(range.text || ""),
-				matchText: String(range.text || ""),
-			});
-		}
+		const results: Array<{ paragraphIndex: number; snippet: string }> = [];
 
-		return {
-			searchText,
-			totalMatches: results.length,
-			matches: results,
-		};
+		paragraphs.items.forEach((p: any, paragraphIndex: number) => {
+			const paraText = String(p.text || "");
+			re.lastIndex = 0;
+			let m: RegExpExecArray | null;
+			while ((m = re.exec(paraText)) !== null) {
+				const matchStart = m.index;
+				const matchEnd = matchStart + m[0].length;
+				const start = Math.max(0, matchStart - snippetRadius);
+				const end = Math.min(paraText.length, matchEnd + snippetRadius);
+				const before = start > 0 ? "…" + paraText.slice(start, matchStart) : paraText.slice(0, matchStart);
+				const after = end < paraText.length ? paraText.slice(matchEnd, end) + "…" : paraText.slice(matchEnd, end);
+				results.push({ paragraphIndex, snippet: before + "[" + m[0] + "]" + after });
+				if (m[0].length === 0) re.lastIndex++;
+			}
+		});
+
+		return { searchText, totalMatches: results.length, matches: results };
 	});
 }
 

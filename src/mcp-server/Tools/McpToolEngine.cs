@@ -465,15 +465,16 @@ public static class McpToolEngine
         new
         {
             name = "word_search",
-            description = "Searches the document for text and returns matching paragraphs with their locations.",
+            description = "Searches the document for text. Returns each match with its paragraphIndex (usable with other word_ tools) and a short snippet showing the match in context (marked with [brackets]).",
             inputSchema = new
             {
                 type = "object",
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["searchText"] = new { type = "string", description = "Text to search for" },
-                    ["matchCase"] = new { type = "boolean", description = "Case-sensitive search. Default: false", @default = false }
+                    ["searchText"] = new { type = "string", description = "Text to search for." },
+                    ["matchCase"] = new { type = "boolean", description = "Case-sensitive search. Default: false.", @default = false },
+                    ["snippetRadius"] = new { type = "number", description = "Characters of context to include before and after the match in the snippet. Default: 60." }
                 },
                 required = new[] { "instanceId", "searchText" }
             }

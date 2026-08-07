@@ -8,6 +8,7 @@ obj/
 node_modules/
 dist/
 .pi-lens/
+.mcp.json
 
 # Production config — internal URLs, do not commit
 helm/*/values-production.yaml

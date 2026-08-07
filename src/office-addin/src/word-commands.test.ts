@@ -161,6 +161,26 @@ describe("word_search", () => {
 		})) as any;
 		expect(result.totalMatches).toBe(0);
 	});
+
+	it("counts each occurrence exactly once, including multiple in one paragraph", async () => {
+		const result = (await processCommand("c8b", "word_search", {
+			searchText: "grew",
+		})) as any;
+
+		// "grew" appears once in paragraph 3 and once in paragraph 4 — exactly 2, not duplicated
+		expect(result.totalMatches).toBe(2);
+		expect(result.matches.map((m: any) => m.paragraphIndex)).toEqual([3, 4]);
+	});
+
+	it("returns paragraphIndex and a snippet with the match bracketed", async () => {
+		const result = (await processCommand("c8c", "word_search", {
+			searchText: "Revenue",
+		})) as any;
+
+		expect(result.matches).toHaveLength(1);
+		expect(result.matches[0].paragraphIndex).toBe(4);
+		expect(result.matches[0].snippet).toContain("[Revenue]");
+	});
 });
 
 // ── WRITE TOOLS ─────────────────────────────────────────────────
