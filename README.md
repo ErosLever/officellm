@@ -51,7 +51,7 @@ For **mutation tools** (`update_shape_text`, `update_speaker_notes`), step 2–4
 | **Unified Office Add-in** | TypeScript/HTML | Single Office JS Add-in that auto-detects host (Word/Excel/PowerPoint/Outlook) via `Office.onReady()`. One manifest for all hosts.        |
 | **Express Server**        | Node.js         | Serves static add-in files + dynamic `manifest.xml` (URLs from Host header). Docker/K8s deployment.                                       |
 
-See [TOOLS.md](TOOLS.md) for the full list of all 129 MCP tools, organized by host application (Word/Excel/PowerPoint/Outlook) and category, with a one-line description of each.
+See [TOOLS.md](TOOLS.md) for the full list of all 130 MCP tools, organized by host application (Word/Excel/PowerPoint/Outlook) and category, with a one-line description of each.
 
 ## Project Structure
 
@@ -65,7 +65,7 @@ src/
 │   │   ├── InstanceRegistry.cs
 │   │   └── CommandStore.cs
 │   └── Tools/
-│       └── McpToolEngine.cs  # 129 tool definitions + dispatch
+│       └── McpToolEngine.cs  # 130 tool definitions + dispatch
 ├── office-addin/     # Unified Office JS Add-in (all hosts)
 │   ├── manifest.xml      # Unified manifest (Presentation + Document + Workbook + Mailbox)
 │   ├── package.json
@@ -75,7 +75,7 @@ src/
 │       ├── index.html        # Task pane UI (host-adaptive)
 │       ├── app.ts            # Main entry, command polling, context display
 │       ├── communication.ts  # MCP registration, heartbeat, instance ID derivation
-│       ├── word-commands.ts  # Word tool handlers (129 tools)
+│       ├── word-commands.ts  # Word tool handlers (130 tools)
 │       └── globals.d.ts      # __MCP_TOKEN__ ambient declaration
 scripts/
 ├── build.sh              # Build script (all/mcp/addin/dev)
@@ -263,6 +263,7 @@ These are hard-won lessons from building this project. Follow them to avoid know
 - **`processCommand()` calls `reportResult()` internally** — don't double-report. The handler already POSTs the result back to the MCP server.
 - **`Office.onReady()` can fire multiple times** — use an `isInitialized` guard to prevent double-registration.
 - **No duplicate `<script>` tags** — `HtmlWebpackPlugin` already injects `bundle.js`. Adding a static `<script src="bundle.js">` causes double initialization.
+- **Command execution is serialized per instance** — `runSerialized()` (`command-queue.ts`) queues every command from both the SignalR handler and the HTTP-polling fallback, so only one `PowerPoint.run()`/`Word.run()`/etc. is ever in flight. Needed because `office_batch_call` fires several tool calls concurrently; without the queue, two overlapping mutations (e.g. two slide duplications) can each read stale state before the other writes.
 
 ### ASP.NET / MCP Server
 

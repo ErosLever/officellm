@@ -1,6 +1,6 @@
 # Tool Reference
 
-All 129 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
+All 130 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
 
 ## Shared / Cross-cutting
 
@@ -9,7 +9,7 @@ All 129 MCP tools exposed by this project, grouped by host application and categ
 | `office_get_active_apps` | Lists all registered Office instances (call this first) |
 | `office_get_document_context` | Rich summary of app, document metadata, and selection state |
 | `office_get_document_stats` | Quantifiable metrics: word/page/slide/cell/item counts |
-| `office_batch_call` | Executes up to 10 tool calls in parallel |
+| `office_batch_call` | Executes up to 10 tool calls in parallel. Commands targeting the same instance are queued and run one at a time on the add-in side, so batched mutations (e.g. duplicating several slides) are race-free |
 | `office_suggest_tools` | Suggests relevant tools for the current host/category |
 | `office_export_document` | Exports the document as PDF or native format (base64) |
 
@@ -47,6 +47,7 @@ All 129 MCP tools exposed by this project, grouped by host application and categ
 | `powerpoint_add_slide` | Inserts a new blank slide |
 | `powerpoint_delete_slide` | Deletes a slide (irreversible) |
 | `powerpoint_move_slide` | Moves a slide to a new position |
+| `powerpoint_duplicate_slide` | Duplicates a slide, optionally to a target position, or into a different open presentation via `targetInstanceId` |
 
 ### Tags & Metadata
 | Tool | Description |
