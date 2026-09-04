@@ -81,6 +81,9 @@ export async function processCommand(
 			case "powerpoint_add_slide":
 				result = await handleAddSlide(args);
 				break;
+			case "powerpoint_set_slide_layout":
+				result = await handleSetSlideLayout(args);
+				break;
 			case "powerpoint_delete_slide":
 				result = await handleDeleteSlide(args);
 				break;
@@ -1033,7 +1036,7 @@ async function handleDeleteShape(args: unknown): Promise<unknown> {
 // ── Slide management ────────────────────────────────────────────
 
 async function handleAddSlide(args: unknown): Promise<unknown> {
-	const config = args as { atIndex?: number };
+	const config = args as { atIndex?: number; layoutId?: string; slideMasterId?: string };
 
 	return runInPowerPoint(async (ctx) => {
 		const pres = ctx.presentation;
@@ -1043,6 +1046,12 @@ async function handleAddSlide(args: unknown): Promise<unknown> {
 		const options: any = {};
 		if (config.atIndex !== undefined) {
 			options.index = config.atIndex;
+		}
+		if (config.layoutId !== undefined) {
+			options.layoutId = config.layoutId;
+		}
+		if (config.slideMasterId !== undefined) {
+			options.slideMasterId = config.slideMasterId;
 		}
 
 		pres.slides.add(options);
@@ -1621,6 +1630,68 @@ async function handleGetLayouts(_args: unknown): Promise<unknown> {
 		}
 
 		return { layouts, count: layouts.length };
+	});
+}
+
+async function handleSetSlideLayout(args: unknown): Promise<unknown> {
+	const config = args as { slideIndex?: number; layoutId: string; slideMasterId?: string };
+	const { slideIndex = 0, layoutId, slideMasterId } = config;
+
+	return runInPowerPoint(async (ctx) => {
+		const pres = ctx.presentation;
+		pres.load("slides");
+		await ctx.sync();
+
+		const slideCount = pres.slides.items.length;
+		if (slideIndex < 0 || slideIndex >= slideCount) {
+			return { error: `Slide index ${slideIndex} out of range (deck has ${slideCount} slides)` };
+		}
+
+		let layoutObj: any;
+
+		if (slideMasterId !== undefined) {
+			const master = ctx.presentation.slideMasters.getItemOrNullObject(slideMasterId);
+			master.load("isNullObject");
+			await ctx.sync();
+			if (master.isNullObject) {
+				return { error: `Slide master '${slideMasterId}' not found` };
+			}
+			layoutObj = master.layouts.getItemOrNullObject(layoutId);
+			layoutObj.load("isNullObject");
+			await ctx.sync();
+			if (layoutObj.isNullObject) {
+				return { error: `Layout '${layoutId}' not found on slide master '${slideMasterId}'` };
+			}
+		} else {
+			const masters = ctx.presentation.slideMasters;
+			masters.load("items");
+			await ctx.sync();
+
+			for (const master of masters.items) {
+				master.layouts.load("items");
+			}
+			await ctx.sync();
+
+			const candidates: any[] = [];
+			for (const master of masters.items) {
+				for (const layout of master.layouts.items) {
+					layout.load(["id"]);
+					candidates.push(layout);
+				}
+			}
+			await ctx.sync();
+
+			layoutObj = candidates.find((l) => l.id === layoutId);
+			if (!layoutObj) {
+				return { error: `Layout '${layoutId}' not found on any slide master` };
+			}
+		}
+
+		const slide = pres.slides.items[slideIndex];
+		slide.applyLayout(layoutObj);
+		await ctx.sync();
+
+		return { slideIndex, layoutId, slideMasterId: slideMasterId ?? null, applied: true, undoable: true };
 	});
 }
 

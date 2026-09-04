@@ -70,7 +70,7 @@ specs/                        # Speckit specifications
 ## Available Endpoints
 
 | Transport       | Endpoint                        | Purpose                                           |
-| --------------- | ------------------------------- | ------------------------------------------------- |
+| --------------- | -------------------------------- | -------------------------------------------------- |
 | Streamable HTTP | `POST /mcp`                     | MCP protocol (initialize, tools/list, tools/call) |
 | REST Bridge     | `GET /openapi.json`             | OpenAPI 3.0 spec for non-MCP clients              |
 | REST Bridge     | `POST /api/{toolName}`          | Direct REST calls to any MCP tool                 |
@@ -133,140 +133,141 @@ When working with the Word JavaScript API in the add-in:
 - **`getTextFrameOrNullObject` equivalent** — Word has no direct equivalent. Use `range.getHtml()` or `range.getText()` to read content. For null-safe patterns, check `range.isNullObject` after `context.sync()`.
 - **Range-based operations** — Word operates on `Range` objects. Get the current selection via `context.document.getSelection()`, then manipulate it as a range.
 
-### Tool Inventory (130 tools)
+### Tool Inventory (131 tools)
 
-| #   | Tool Name                            | Host       | Category        |
-| --- | ------------------------------------ | ---------- | --------------- |
-| 1   | `office_get_active_apps`             | Shared     | Read            |
-| 2   | `office_get_document_context`        | Shared     | Read            |
-| 3   | `office_get_document_stats`          | Shared     | Read            |
-| 4   | `office_batch_call`                  | Shared     | Batch           |
-| 5   | `office_suggest_tools`               | Shared     | Discovery       |
-| 6   | `powerpoint_get_deck_outline`        | PowerPoint | Read            |
-| 7   | `powerpoint_get_slide`               | PowerPoint | Read            |
-| 8   | `powerpoint_get_slide_image`         | PowerPoint | Read            |
-| 9   | `powerpoint_get_shape_image`         | PowerPoint | Read            |
-| 10  | `powerpoint_get_table`               | PowerPoint | Read            |
-| 11  | `powerpoint_get_selection`           | PowerPoint | Read            |
-| 12  | `powerpoint_get_speaker_notes`       | PowerPoint | Read            |
-| 13  | `powerpoint_update_shape_text`       | PowerPoint | Write           |
-| 14  | `powerpoint_update_shape_properties` | PowerPoint | Write           |
-| 15  | `powerpoint_update_speaker_notes`    | PowerPoint | Write           |
-| 16  | `powerpoint_add_textbox`             | PowerPoint | Write           |
-| 17  | `powerpoint_add_image`               | PowerPoint | Write           |
-| 18  | `powerpoint_add_table`               | PowerPoint | Write           |
-| 19  | `powerpoint_delete_shape`            | PowerPoint | Write           |
-| 20  | `powerpoint_add_slide`               | PowerPoint | Write           |
-| 21  | `powerpoint_delete_slide`            | PowerPoint | Write           |
-| 22  | `powerpoint_move_slide`              | PowerPoint | Write           |
-| 23  | `powerpoint_duplicate_slide`         | PowerPoint | Write (cross-doc via `targetInstanceId`) |
-| 24  | `word_get_outline`                   | Word       | Read            |
-| 25  | `word_get_paragraphs`                | Word       | Read            |
-| 26  | `word_get_selection`                 | Word       | Read            |
-| 27  | `word_search`                        | Word       | Read            |
-| 28  | `word_replace_text`                  | Word       | Write (tracked) |
-| 29  | `word_insert_text`                   | Word       | Write (tracked) |
-| 30  | `word_add_comment`                   | Word       | Write           |
-| 31  | `word_delete_paragraph`              | Word       | Write (tracked) |
-| 32  | `word_get_tracked_changes`           | Word       | Read            |
-| 33  | `word_accept_all_changes`            | Word       | Write           |
-| 34  | `word_reject_all_changes`            | Word       | Write           |
-| 35  | `word_get_tables`                    | Word       | Read            |
-| 36  | `word_insert_table`                  | Word       | Write (tracked) |
-| 37  | `word_update_table_cell`             | Word       | Write (tracked) |
-| 38  | `word_add_table_rows`                | Word       | Write           |
-| 39  | `word_delete_table_row`              | Word       | Write           |
-| 40  | `word_delete_table_column`           | Word       | Write           |
-| 41  | `word_add_table_column`              | Word       | Write           |
-| 42  | `word_merge_table_cells`             | Word       | Write           |
-| 43  | `word_split_table_cell`              | Word       | Write           |
-| 44  | `word_copy_table_structure`          | Word       | Write           |
-| 45  | `word_set_table_format`              | Word       | Write           |
-| 46  | `word_get_headers_footers`           | Word       | Read            |
-| 47  | `word_set_header_footer`             | Word       | Write (tracked) |
-| 48  | `word_replace_selection`             | Word       | Write (tracked) |
-| 49  | `word_insert_image`                  | Word       | Write           |
-| 50  | `word_apply_style`                   | Word       | Write           |
-| 51  | `word_get_sections`                  | Word       | Read            |
-| 52  | `word_insert_list`                   | Word       | Write (tracked) |
-| 53  | `excel_get_workbook_map`             | Excel      | Read            |
-| 54  | `excel_read_range`                   | Excel      | Read            |
-| 55  | `excel_write_range`                  | Excel      | Write           |
-| 56  | `excel_write_formula`                | Excel      | Write           |
-| 57  | `excel_create_table`                 | Excel      | Write           |
-| 58  | `excel_add_sheet`                    | Excel      | Write           |
-| 59  | `excel_delete_sheet`                 | Excel      | Write           |
-| 60  | `excel_rename_sheet`                 | Excel      | Write           |
-| 61  | `excel_sort_range`                   | Excel      | Write           |
-| 62  | `excel_filter_range`                 | Excel      | Write           |
-| 63  | `excel_create_chart`                 | Excel      | Write           |
-| 64  | `excel_get_charts`                   | Excel      | Read            |
-| 65  | `excel_format_range`                 | Excel      | Write           |
-| 66  | `excel_apply_conditional_formatting` | Excel      | Write           |
-| 67  | `excel_create_pivottable`            | Excel      | Write           |
-| 68  | `outlook_get_current_item`           | Outlook    | Read            |
-| 69  | `outlook_summarize_thread`           | Outlook    | Read            |
-| 70  | `outlook_draft_reply`                | Outlook    | Write (draft)   |
-| 71  | `outlook_apply_category`             | Outlook    | Write           |
-| 72  | `outlook_send_message`               | Outlook    | Write (gated)   |
-| 73  | `outlook_get_user_profile`           | Outlook    | Read            |
-| 74  | `outlook_get_master_categories`      | Outlook    | Read            |
-| 75  | `outlook_create_category`            | Outlook    | Write           |
-| 76  | `outlook_remove_categories`          | Outlook    | Write           |
-| 77  | `outlook_display_new_message`        | Outlook    | Write (gated)   |
-| 78  | `outlook_display_new_appointment`    | Outlook    | Write (gated)   |
-| 79  | `outlook_get_attachments`            | Outlook    | Read            |
-| 80  | `office_export_document`             | **All**    | Read (export)   |
-| 81  | `word_find_replace`                  | Word       | Write (tracked) |
-| 82  | `excel_freeze_panes`                 | Excel      | Write           |
-| 83  | `excel_get_named_ranges`             | Excel      | Read            |
-| 84  | `excel_add_named_range`              | Excel      | Write           |
-| 85  | `excel_add_data_validation`          | Excel      | Write           |
-| 86  | `excel_remove_data_validation`       | Excel      | Write           |
-| 87  | `powerpoint_get_tags`                | PowerPoint | Read            |
-| 88  | `powerpoint_set_tag`                 | PowerPoint | Write           |
-| 89  | `powerpoint_delete_slides_by_tag`    | PowerPoint | Write           |
-| 90  | `powerpoint_set_shape_fill`          | PowerPoint | Write           |
-| 91  | `powerpoint_set_shape_line`          | PowerPoint | Write           |
-| 92  | `powerpoint_set_shape_rotation`      | PowerPoint | Write           |
-| 93  | `powerpoint_add_geometric_shape`     | PowerPoint | Write           |
-| 94  | `powerpoint_add_line`                | PowerPoint | Write           |
-| 95  | `powerpoint_insert_slides_from_file` | PowerPoint | Write           |
-| 96  | `powerpoint_get_layouts`             | PowerPoint | Read            |
-| 97  | `powerpoint_get_theme_colors`        | PowerPoint | Read            |
-| 98  | `powerpoint_group_shapes`            | PowerPoint | Write           |
-| 99  | `powerpoint_ungroup_shape`           | PowerPoint | Write           |
-| 100 | `word_get_bookmarks`                 | Word       | Read            |
-| 101 | `word_insert_bookmark`               | Word       | Write (tracked) |
-| 102 | `word_delete_bookmark`               | Word       | Write           |
-| 103 | `word_goto_bookmark`                 | Word       | Read            |
-| 104 | `word_get_properties`                | Word       | Read            |
-| 105 | `word_set_properties`                | Word       | Write           |
-| 106 | `word_get_hyperlinks`                | Word       | Read            |
-| 107 | `word_insert_hyperlink`              | Word       | Write (tracked) |
-| 108 | `word_insert_footnote`               | Word       | Write (tracked) |
-| 109 | `word_insert_endnote`                | Word       | Write (tracked) |
-| 110 | `word_insert_field`                  | Word       | Write (tracked) |
-| 111 | `word_get_content_controls`          | Word       | Read            |
-| 112 | `word_insert_content_control`        | Word       | Write (tracked) |
-| 113 | `word_get_formatting`                | Word       | Read            |
-| 114 | `word_set_formatting`                | Word       | Write           |
-| 115 | `word_get_comments`                  | Word       | Read            |
-| 116 | `word_edit_comment`                  | Word       | Write           |
-| 117 | `word_resolve_comment`               | Word       | Write           |
-| 118 | `word_delete_comment`                | Word       | Write           |
-| 119 | `word_reply_to_comment`              | Word       | Write           |
-| 120 | `word_edit_reply`                    | Word       | Write           |
-| 121 | `word_delete_reply`                  | Word       | Write           |
-| 122 | `word_get_styles`                    | Word       | Read            |
-| 123 | `word_modify_style`                  | Word       | Write           |
-| 124 | `word_create_style`                  | Word       | Write           |
-| 125 | `word_create_and_remap_style`        | Word       | Write           |
-| 126 | `word_get_image`                     | Word       | Read            |
-| 127 | `excel_protect_sheet`                | Excel      | Write           |
-| 128 | `excel_unprotect_sheet`              | Excel      | Write           |
-| 129 | `excel_set_page_layout`              | Excel      | Write           |
-| 130 | `excel_get_page_layout`              | Excel      | Read            |
+| Tool Name                            | Host       | Category        |
+| ------------------------------------- | ---------- | --------------- |
+| `office_get_active_apps`             | Shared     | Read            |
+| `office_get_document_context`        | Shared     | Read            |
+| `office_get_document_stats`          | Shared     | Read            |
+| `office_batch_call`                  | Shared     | Batch           |
+| `office_suggest_tools`               | Shared     | Discovery       |
+| `powerpoint_get_deck_outline`        | PowerPoint | Read            |
+| `powerpoint_get_slide`               | PowerPoint | Read            |
+| `powerpoint_get_slide_image`         | PowerPoint | Read            |
+| `powerpoint_get_shape_image`         | PowerPoint | Read            |
+| `powerpoint_get_table`               | PowerPoint | Read            |
+| `powerpoint_get_selection`           | PowerPoint | Read            |
+| `powerpoint_get_speaker_notes`       | PowerPoint | Read            |
+| `powerpoint_update_shape_text`       | PowerPoint | Write           |
+| `powerpoint_update_shape_properties` | PowerPoint | Write           |
+| `powerpoint_update_speaker_notes`    | PowerPoint | Write           |
+| `powerpoint_add_textbox`             | PowerPoint | Write           |
+| `powerpoint_add_image`               | PowerPoint | Write           |
+| `powerpoint_add_table`               | PowerPoint | Write           |
+| `powerpoint_delete_shape`            | PowerPoint | Write           |
+| `powerpoint_add_slide`               | PowerPoint | Write           |
+| `powerpoint_set_slide_layout`        | PowerPoint | Write           |
+| `powerpoint_delete_slide`            | PowerPoint | Write           |
+| `powerpoint_move_slide`              | PowerPoint | Write           |
+| `powerpoint_duplicate_slide`         | PowerPoint | Write (cross-doc via `targetInstanceId`) |
+| `word_get_outline`                   | Word       | Read            |
+| `word_get_paragraphs`                | Word       | Read            |
+| `word_get_selection`                 | Word       | Read            |
+| `word_search`                        | Word       | Read            |
+| `word_replace_text`                  | Word       | Write (tracked) |
+| `word_insert_text`                   | Word       | Write (tracked) |
+| `word_add_comment`                   | Word       | Write           |
+| `word_delete_paragraph`              | Word       | Write (tracked) |
+| `word_get_tracked_changes`           | Word       | Read            |
+| `word_accept_all_changes`            | Word       | Write           |
+| `word_reject_all_changes`            | Word       | Write           |
+| `word_get_tables`                    | Word       | Read            |
+| `word_insert_table`                  | Word       | Write (tracked) |
+| `word_update_table_cell`             | Word       | Write (tracked) |
+| `word_add_table_rows`                | Word       | Write           |
+| `word_delete_table_row`              | Word       | Write           |
+| `word_delete_table_column`           | Word       | Write           |
+| `word_add_table_column`              | Word       | Write           |
+| `word_merge_table_cells`             | Word       | Write           |
+| `word_split_table_cell`              | Word       | Write           |
+| `word_copy_table_structure`          | Word       | Write           |
+| `word_set_table_format`              | Word       | Write           |
+| `word_get_headers_footers`           | Word       | Read            |
+| `word_set_header_footer`             | Word       | Write (tracked) |
+| `word_replace_selection`             | Word       | Write (tracked) |
+| `word_insert_image`                  | Word       | Write           |
+| `word_apply_style`                   | Word       | Write           |
+| `word_get_sections`                  | Word       | Read            |
+| `word_insert_list`                   | Word       | Write (tracked) |
+| `excel_get_workbook_map`             | Excel      | Read            |
+| `excel_read_range`                   | Excel      | Read            |
+| `excel_write_range`                  | Excel      | Write           |
+| `excel_write_formula`                | Excel      | Write           |
+| `excel_create_table`                 | Excel      | Write           |
+| `excel_add_sheet`                    | Excel      | Write           |
+| `excel_delete_sheet`                 | Excel      | Write           |
+| `excel_rename_sheet`                 | Excel      | Write           |
+| `excel_sort_range`                   | Excel      | Write           |
+| `excel_filter_range`                 | Excel      | Write           |
+| `excel_create_chart`                 | Excel      | Write           |
+| `excel_get_charts`                   | Excel      | Read            |
+| `excel_format_range`                 | Excel      | Write           |
+| `excel_apply_conditional_formatting` | Excel      | Write           |
+| `excel_create_pivottable`            | Excel      | Write           |
+| `outlook_get_current_item`           | Outlook    | Read            |
+| `outlook_summarize_thread`           | Outlook    | Read            |
+| `outlook_draft_reply`                | Outlook    | Write (draft)   |
+| `outlook_apply_category`             | Outlook    | Write           |
+| `outlook_send_message`               | Outlook    | Write (gated)   |
+| `outlook_get_user_profile`           | Outlook    | Read            |
+| `outlook_get_master_categories`      | Outlook    | Read            |
+| `outlook_create_category`            | Outlook    | Write           |
+| `outlook_remove_categories`          | Outlook    | Write           |
+| `outlook_display_new_message`        | Outlook    | Write (gated)   |
+| `outlook_display_new_appointment`    | Outlook    | Write (gated)   |
+| `outlook_get_attachments`            | Outlook    | Read            |
+| `office_export_document`             | **All**    | Read (export)   |
+| `word_find_replace`                  | Word       | Write (tracked) |
+| `excel_freeze_panes`                 | Excel      | Write           |
+| `excel_get_named_ranges`             | Excel      | Read            |
+| `excel_add_named_range`              | Excel      | Write           |
+| `excel_add_data_validation`          | Excel      | Write           |
+| `excel_remove_data_validation`       | Excel      | Write           |
+| `powerpoint_get_tags`                | PowerPoint | Read            |
+| `powerpoint_set_tag`                 | PowerPoint | Write           |
+| `powerpoint_delete_slides_by_tag`    | PowerPoint | Write           |
+| `powerpoint_set_shape_fill`          | PowerPoint | Write           |
+| `powerpoint_set_shape_line`          | PowerPoint | Write           |
+| `powerpoint_set_shape_rotation`      | PowerPoint | Write           |
+| `powerpoint_add_geometric_shape`     | PowerPoint | Write           |
+| `powerpoint_add_line`                | PowerPoint | Write           |
+| `powerpoint_insert_slides_from_file` | PowerPoint | Write           |
+| `powerpoint_get_layouts`             | PowerPoint | Read            |
+| `powerpoint_get_theme_colors`        | PowerPoint | Read            |
+| `powerpoint_group_shapes`            | PowerPoint | Write           |
+| `powerpoint_ungroup_shape`           | PowerPoint | Write           |
+| `word_get_bookmarks`                 | Word       | Read            |
+| `word_insert_bookmark`               | Word       | Write (tracked) |
+| `word_delete_bookmark`               | Word       | Write           |
+| `word_goto_bookmark`                 | Word       | Read            |
+| `word_get_properties`                | Word       | Read            |
+| `word_set_properties`                | Word       | Write           |
+| `word_get_hyperlinks`                | Word       | Read            |
+| `word_insert_hyperlink`              | Word       | Write (tracked) |
+| `word_insert_footnote`               | Word       | Write (tracked) |
+| `word_insert_endnote`                | Word       | Write (tracked) |
+| `word_insert_field`                  | Word       | Write (tracked) |
+| `word_get_content_controls`          | Word       | Read            |
+| `word_insert_content_control`        | Word       | Write (tracked) |
+| `word_get_formatting`                | Word       | Read            |
+| `word_set_formatting`                | Word       | Write           |
+| `word_get_comments`                  | Word       | Read            |
+| `word_edit_comment`                  | Word       | Write           |
+| `word_resolve_comment`               | Word       | Write           |
+| `word_delete_comment`                | Word       | Write           |
+| `word_reply_to_comment`              | Word       | Write           |
+| `word_edit_reply`                    | Word       | Write           |
+| `word_delete_reply`                  | Word       | Write           |
+| `word_get_styles`                    | Word       | Read            |
+| `word_modify_style`                  | Word       | Write           |
+| `word_create_style`                  | Word       | Write           |
+| `word_create_and_remap_style`        | Word       | Write           |
+| `word_get_image`                     | Word       | Read            |
+| `excel_protect_sheet`                | Excel      | Write           |
+| `excel_unprotect_sheet`              | Excel      | Write           |
+| `excel_set_page_layout`              | Excel      | Write           |
+| `excel_get_page_layout`              | Excel      | Read            |
 
 **Mutation modes by host**:
 

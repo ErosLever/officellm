@@ -1,6 +1,6 @@
 # Tool Reference
 
-All 130 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
+All 131 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
 
 ## Shared / Cross-cutting
 
@@ -45,6 +45,7 @@ All 130 MCP tools exposed by this project, grouped by host application and categ
 | Tool | Description |
 |---|---|
 | `powerpoint_add_slide` | Inserts a new blank slide |
+| `powerpoint_set_slide_layout` | Changes the layout applied to an existing slide |
 | `powerpoint_delete_slide` | Deletes a slide (irreversible) |
 | `powerpoint_move_slide` | Moves a slide to a new position |
 | `powerpoint_duplicate_slide` | Duplicates a slide, optionally to a target position, or into a different open presentation via `targetInstanceId` |

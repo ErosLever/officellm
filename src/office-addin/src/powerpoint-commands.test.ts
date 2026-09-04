@@ -479,6 +479,98 @@ describe("powerpoint_add_slide", () => {
 		expect(result.slideIndex).toBe(1);
 		expect(mock.data.slides).toHaveLength(4);
 	});
+
+	it("passes layoutId through to the new slide", async () => {
+		const result = (await processCommand("cmd-26b", "powerpoint_add_slide", {
+			layoutId: "layout_1",
+		})) as any;
+
+		expect(result.slideIndex).toBe(3);
+		expect(mock.data.slides[3].layoutId).toBe("layout_1");
+	});
+
+	it("passes slideMasterId through alongside layoutId", async () => {
+		await processCommand("cmd-26c", "powerpoint_add_slide", {
+			layoutId: "layout_2",
+			slideMasterId: "master_0",
+		});
+
+		expect(mock.data.slides.at(-1)?.layoutId).toBe("layout_2");
+	});
+});
+
+describe("powerpoint_get_layouts", () => {
+	it("returns layouts from the default slide master fixture", async () => {
+		const result = (await processCommand(
+			"cmd-layouts-1",
+			"powerpoint_get_layouts",
+			{},
+		)) as any;
+
+		expect(result.count).toBe(3);
+		expect(result.layouts[0]).toEqual({
+			id: "layout_0",
+			name: "Title Slide",
+			master: "Office Theme",
+		});
+	});
+});
+
+describe("powerpoint_set_slide_layout", () => {
+	it("applies a layout found via unscoped search across masters", async () => {
+		const result = (await processCommand(
+			"cmd-layout-1",
+			"powerpoint_set_slide_layout",
+			{ slideIndex: 0, layoutId: "layout_1" },
+		)) as any;
+
+		expect(result.applied).toBe(true);
+		expect(result.slideIndex).toBe(0);
+		expect(result.layoutId).toBe("layout_1");
+		expect(mock.data.slides[0].layoutId).toBe("layout_1");
+	});
+
+	it("applies a layout when slideMasterId is given", async () => {
+		const result = (await processCommand(
+			"cmd-layout-2",
+			"powerpoint_set_slide_layout",
+			{ slideIndex: 1, layoutId: "layout_2", slideMasterId: "master_0" },
+		)) as any;
+
+		expect(result.applied).toBe(true);
+		expect(result.slideMasterId).toBe("master_0");
+		expect(mock.data.slides[1].layoutId).toBe("layout_2");
+	});
+
+	it("errors when layoutId is not found on any master", async () => {
+		const result = (await processCommand(
+			"cmd-layout-3",
+			"powerpoint_set_slide_layout",
+			{ slideIndex: 0, layoutId: "nonexistent_layout" },
+		)) as any;
+
+		expect(result.error).toContain("not found");
+	});
+
+	it("errors when slideMasterId is not found", async () => {
+		const result = (await processCommand(
+			"cmd-layout-4",
+			"powerpoint_set_slide_layout",
+			{ slideIndex: 0, layoutId: "layout_0", slideMasterId: "nonexistent_master" },
+		)) as any;
+
+		expect(result.error).toContain("not found");
+	});
+
+	it("errors on out-of-range slideIndex", async () => {
+		const result = (await processCommand(
+			"cmd-layout-5",
+			"powerpoint_set_slide_layout",
+			{ slideIndex: 99, layoutId: "layout_0" },
+		)) as any;
+
+		expect(result.error).toContain("out of range");
+	});
 });
 
 describe("powerpoint_delete_slide", () => {

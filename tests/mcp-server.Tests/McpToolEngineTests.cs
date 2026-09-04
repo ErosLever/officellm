@@ -11,12 +11,12 @@ public class McpToolEngineTests
 	}
 
     [Fact]
-    public void GetToolDefinitions_Returns130Tools()
+    public void GetToolDefinitions_Returns131Tools()
     {
         var tools = McpToolEngine.GetToolDefinitions();
 
         Assert.NotNull(tools);
-        Assert.Equal(130, tools.Length);
+        Assert.Equal(131, tools.Length);
     }
 
     [Fact]
@@ -55,6 +55,7 @@ public class McpToolEngineTests
 
         // Slide management
         Assert.Contains("powerpoint_add_slide", names);
+        Assert.Contains("powerpoint_set_slide_layout", names);
         Assert.Contains("powerpoint_delete_slide", names);
         Assert.Contains("powerpoint_move_slide", names);
         Assert.Contains("powerpoint_duplicate_slide", names);

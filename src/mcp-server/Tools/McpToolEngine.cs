@@ -372,16 +372,35 @@ public static class McpToolEngine
         new
         {
             name = "powerpoint_add_slide",
-            description = "Inserts a new blank slide at the specified position. If atIndex is omitted, adds at the end.",
+            description = "Inserts a new blank slide at the specified position. If atIndex is omitted, adds at the end. Optionally specify layoutId/slideMasterId to control which slide layout the new slide uses.",
             inputSchema = new
             {
                 type = "object",
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["atIndex"] = new { type = "integer", description = "Zero-based index to insert at. Default: end of deck." }
+                    ["atIndex"] = new { type = "integer", description = "Zero-based index to insert at. Default: end of deck." },
+                    ["layoutId"] = new { type = "string", description = "Layout ID to apply to the new slide (see powerpoint_get_layouts). If slideMasterId is omitted, the layout must exist on the default slide master (the previous slide's master, or the presentation's first master)." },
+                    ["slideMasterId"] = new { type = "string", description = "Slide master ID to use for the new slide. If layoutId is omitted but this is set, the first layout on that master is used." }
                 },
                 required = new[] { "instanceId" }
+            }
+        },
+        new
+        {
+            name = "powerpoint_set_slide_layout",
+            description = "Changes the layout applied to an existing slide. Layout IDs are scoped per slide master — pass slideMasterId to disambiguate if the same layoutId exists on multiple masters. Use powerpoint_get_layouts to discover valid IDs.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "Zero-based index of the slide whose layout should change." },
+                    ["layoutId"] = new { type = "string", description = "REQUIRED. Layout ID to apply (see powerpoint_get_layouts)." },
+                    ["slideMasterId"] = new { type = "string", description = "Optional slide master ID to disambiguate layoutId when multiple masters define a layout with the same ID." }
+                },
+                required = new[] { "instanceId", "slideIndex", "layoutId" }
             }
         },
         new
@@ -941,6 +960,7 @@ public static class McpToolEngine
         "powerpoint_add_table",
         "powerpoint_delete_shape",
         "powerpoint_add_slide",
+        "powerpoint_set_slide_layout",
         "powerpoint_delete_slide",
         "powerpoint_move_slide",
         "powerpoint_duplicate_slide",
@@ -1131,6 +1151,14 @@ public static class McpToolEngine
             {
                 return await HandleCrossDocumentDuplicateSlide(instanceId, tiid.GetString()!, args.Value);
             }
+        }
+
+        if (name == "powerpoint_set_slide_layout" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "layoutId", "slideMasterId");
+            if (unknownParamError != null)
+                return unknownParamError;
         }
 
         return await DispatchToAddIn(instanceId, name, args);

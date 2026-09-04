@@ -51,7 +51,7 @@ For **mutation tools** (`update_shape_text`, `update_speaker_notes`), step 2–4
 | **Unified Office Add-in** | TypeScript/HTML | Single Office JS Add-in that auto-detects host (Word/Excel/PowerPoint/Outlook) via `Office.onReady()`. One manifest for all hosts.        |
 | **Express Server**        | Node.js         | Serves static add-in files + dynamic `manifest.xml` (URLs from Host header). Docker/K8s deployment.                                       |
 
-See [TOOLS.md](TOOLS.md) for the full list of all 130 MCP tools, organized by host application (Word/Excel/PowerPoint/Outlook) and category, with a one-line description of each.
+See [TOOLS.md](TOOLS.md) for the full list of all 131 MCP tools, organized by host application (Word/Excel/PowerPoint/Outlook) and category, with a one-line description of each.
 
 ## Project Structure
 
@@ -65,7 +65,7 @@ src/
 │   │   ├── InstanceRegistry.cs
 │   │   └── CommandStore.cs
 │   └── Tools/
-│       └── McpToolEngine.cs  # 130 tool definitions + dispatch
+│       └── McpToolEngine.cs  # 131 tool definitions + dispatch
 ├── office-addin/     # Unified Office JS Add-in (all hosts)
 │   ├── manifest.xml      # Unified manifest (Presentation + Document + Workbook + Mailbox)
 │   ├── package.json
@@ -75,7 +75,7 @@ src/
 │       ├── index.html        # Task pane UI (host-adaptive)
 │       ├── app.ts            # Main entry, command polling, context display
 │       ├── communication.ts  # MCP registration, heartbeat, instance ID derivation
-│       ├── word-commands.ts  # Word tool handlers (130 tools)
+│       ├── word-commands.ts  # Word tool handlers (131 tools)
 │       └── globals.d.ts      # __MCP_TOKEN__ ambient declaration
 scripts/
 ├── build.sh              # Build script (all/mcp/addin/dev)

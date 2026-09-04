@@ -43,11 +43,36 @@ export interface MockSlideData {
 	id?: string;
 	shapes: MockShapeData[];
 	notes?: string;
+	layoutId?: string;
+}
+
+export interface MockLayoutData {
+	id: string;
+	name: string;
+}
+
+export interface MockSlideMasterData {
+	id: string;
+	name: string;
+	layouts: MockLayoutData[];
 }
 
 export interface MockPresentationData {
 	slides: MockSlideData[];
+	slideMasters?: MockSlideMasterData[];
 }
+
+const DEFAULT_SLIDE_MASTERS: MockSlideMasterData[] = [
+	{
+		id: "master_0",
+		name: "Office Theme",
+		layouts: [
+			{ id: "layout_0", name: "Title Slide" },
+			{ id: "layout_1", name: "Title and Content" },
+			{ id: "layout_2", name: "Blank" },
+		],
+	},
+];
 
 // ── ClientResult ────────────────────────────────────────────────
 
@@ -148,6 +173,9 @@ class MockContext {
 
 	constructor(data: MockPresentationData) {
 		this._data = data;
+		if (!this._data.slideMasters) {
+			this._data.slideMasters = DEFAULT_SLIDE_MASTERS;
+		}
 		this.presentation = new MockPresentation(this, data);
 	}
 
@@ -179,10 +207,12 @@ class MockContext {
 class MockPresentation {
 	private _ctx: MockContext;
 	slides: MockSlideCollection;
+	slideMasters: MockSlideMasterCollection;
 
 	constructor(ctx: MockContext, data: MockPresentationData) {
 		this._ctx = ctx;
 		this.slides = new MockSlideCollection(ctx, data.slides);
+		this.slideMasters = new MockSlideMasterCollection(ctx, data.slideMasters ?? []);
 	}
 
 	load(prop: string) {
@@ -214,6 +244,178 @@ class MockPresentation {
 	}
 }
 
+// ── Mock Slide Layout ────────────────────────────────────────────
+
+class MockSlideLayout {
+	private _ctx: MockContext;
+	private _data: MockLayoutData;
+	private _loaded = new Set<string>();
+	private _id = "";
+	private _name = "";
+	isNullObject = false;
+
+	constructor(ctx: MockContext, data: MockLayoutData, isNullObject = false) {
+		this._ctx = ctx;
+		this._data = data;
+		this.isNullObject = isNullObject;
+	}
+
+	get id() {
+		return this._id;
+	}
+	get name() {
+		return this._name;
+	}
+
+	load(props: string | string[]) {
+		const propList = Array.isArray(props)
+			? props
+			: props.split(",").map((p) => p.trim());
+		for (const p of propList) this._loaded.add(p);
+		this._ctx.queueLoad(this, propList);
+	}
+
+	_populate(props: string[]) {
+		const l = this._loaded;
+		if (l.has("id") || props.includes("id")) this._id = this._data.id;
+		if (l.has("name") || props.includes("name")) this._name = this._data.name;
+	}
+}
+
+// ── Mock Slide Layout Collection ─────────────────────────────────
+
+class MockSlideLayoutCollection {
+	private _ctx: MockContext;
+	private _data: MockLayoutData[];
+	items: MockSlideLayout[];
+
+	constructor(ctx: MockContext, data: MockLayoutData[]) {
+		this._ctx = ctx;
+		this._data = data;
+		this.items = data.map((d) => new MockSlideLayout(ctx, d));
+	}
+
+	load(props: string | string[]) {
+		const propList = Array.isArray(props)
+			? props
+			: props.split(",").map((p) => p.trim());
+		if (propList.includes("items")) this._ctx.queueLoad(this, ["items"]);
+	}
+
+	getItem(key: string): MockSlideLayout {
+		const found = this.items.find((l) => (l as any)._data.id === key);
+		if (!found) throw new Error(`Layout '${key}' not found`);
+		return found;
+	}
+
+	getItemAt(index: number): MockSlideLayout {
+		const found = this.items[index];
+		if (!found) throw new Error(`Layout index ${index} out of range`);
+		return found;
+	}
+
+	getItemOrNullObject(key: string): MockSlideLayout {
+		const found = this.items.find((l) => (l as any)._data.id === key);
+		if (found) return found;
+		return new MockSlideLayout(this._ctx, { id: "", name: "" }, true);
+	}
+
+	_populate() {
+		/* items already populated */
+	}
+}
+
+// ── Mock Slide Master ─────────────────────────────────────────────
+
+class MockSlideMaster {
+	private _ctx: MockContext;
+	private _data: MockSlideMasterData;
+	private _loaded = new Set<string>();
+	private _id = "";
+	private _name = "";
+	layouts: MockSlideLayoutCollection;
+	isNullObject = false;
+
+	constructor(
+		ctx: MockContext,
+		data: MockSlideMasterData,
+		isNullObject = false,
+	) {
+		this._ctx = ctx;
+		this._data = data;
+		this.isNullObject = isNullObject;
+		this.layouts = new MockSlideLayoutCollection(ctx, data.layouts ?? []);
+	}
+
+	get id() {
+		return this._id;
+	}
+	get name() {
+		return this._name;
+	}
+
+	load(props: string | string[]) {
+		const propList = Array.isArray(props)
+			? props
+			: props.split(",").map((p) => p.trim());
+		for (const p of propList) this._loaded.add(p);
+		this._ctx.queueLoad(this, propList);
+	}
+
+	_populate(props: string[]) {
+		const l = this._loaded;
+		if (l.has("id") || props.includes("id")) this._id = this._data.id;
+		if (l.has("name") || props.includes("name")) this._name = this._data.name;
+	}
+}
+
+// ── Mock Slide Master Collection ──────────────────────────────────
+
+class MockSlideMasterCollection {
+	private _ctx: MockContext;
+	private _data: MockSlideMasterData[];
+	items: MockSlideMaster[];
+
+	constructor(ctx: MockContext, data: MockSlideMasterData[]) {
+		this._ctx = ctx;
+		this._data = data;
+		this.items = data.map((d) => new MockSlideMaster(ctx, d));
+	}
+
+	load(props: string | string[]) {
+		const propList = Array.isArray(props)
+			? props
+			: props.split(",").map((p) => p.trim());
+		if (propList.includes("items")) this._ctx.queueLoad(this, ["items"]);
+	}
+
+	getItem(key: string): MockSlideMaster {
+		const found = this.items.find((m) => (m as any)._data.id === key);
+		if (!found) throw new Error(`Slide master '${key}' not found`);
+		return found;
+	}
+
+	getItemAt(index: number): MockSlideMaster {
+		const found = this.items[index];
+		if (!found) throw new Error(`Slide master index ${index} out of range`);
+		return found;
+	}
+
+	getItemOrNullObject(key: string): MockSlideMaster {
+		const found = this.items.find((m) => (m as any)._data.id === key);
+		if (found) return found;
+		return new MockSlideMaster(
+			this._ctx,
+			{ id: "", name: "", layouts: [] },
+			true,
+		);
+	}
+
+	_populate() {
+		/* items already populated */
+	}
+}
+
 // ── Mock Slide Collection ───────────────────────────────────────
 
 class MockSlideCollection {
@@ -232,6 +434,7 @@ class MockSlideCollection {
 			id: `slide_${this._data.length}`,
 			shapes: [],
 			notes: "",
+			layoutId: options?.layoutId,
 		};
 		this._data.push(newSlide);
 		this.items.push(new MockSlide(this._ctx, newSlide, this._data.length - 1));
@@ -298,6 +501,16 @@ class MockSlide {
 		this._ctx.queueAction(() => {
 			this._data.id = `moved_to_${newIndex}`;
 		});
+	}
+
+	applyLayout(layout: MockSlideLayout) {
+		this._ctx.queueAction(() => {
+			this._data.layoutId = (layout as any)._data.id;
+		});
+	}
+
+	get layout() {
+		return { id: this._data.layoutId ?? "" };
 	}
 
 	getNotesSlide() {
