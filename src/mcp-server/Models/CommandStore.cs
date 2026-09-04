@@ -107,6 +107,17 @@ public class CommandStore
     }
 
     /// <summary>
+    /// Looks up a command by ID without mutating any state. Used for diagnostics/logging.
+    /// </summary>
+    public PendingCommand? TryGetCommand(string commandId)
+    {
+        lock (_lock)
+        {
+            return _commands.TryGetValue(commandId, out var cmd) ? cmd : null;
+        }
+    }
+
+    /// <summary>
     /// Records the result of a completed command.
     /// Resolves the TaskCompletionSource for instant notification (SignalR path).
     /// </summary>

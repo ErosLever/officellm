@@ -503,6 +503,103 @@ describe("powerpoint_move_slide", () => {
 	});
 });
 
+describe("powerpoint_duplicate_slide", () => {
+	it("duplicates a slide right after the source by default", async () => {
+		const result = (await processCommand(
+			"cmd-29",
+			"powerpoint_duplicate_slide",
+			{ slideIndex: 0 },
+		)) as any;
+
+		expect(result.sourceIndex).toBe(0);
+		expect(result.newSlideIndex).toBe(1);
+		expect(mock.data.slides).toHaveLength(4); // was 3
+	});
+
+	it("moves the duplicate to a specific target index", async () => {
+		const result = (await processCommand(
+			"cmd-30",
+			"powerpoint_duplicate_slide",
+			{ slideIndex: 0, targetIndex: 3 },
+		)) as any;
+
+		expect(result.sourceIndex).toBe(0);
+		expect(result.newSlideIndex).toBe(3);
+		expect(mock.data.slides).toHaveLength(4);
+	});
+
+	it("errors on out-of-range slideIndex", async () => {
+		const result = (await processCommand(
+			"cmd-31",
+			"powerpoint_duplicate_slide",
+			{ slideIndex: 99 },
+		)) as any;
+
+		expect(result.error).toContain("out of range");
+	});
+
+	it("accepts targetIndex equal to slide count (append at end)", async () => {
+		// Deck starts with 3 slides; targetIndex == slideCount (3) means "append
+		// after the new last slide" once the duplicate is inserted — must be valid.
+		const result = (await processCommand(
+			"cmd-32",
+			"powerpoint_duplicate_slide",
+			{ slideIndex: 0, targetIndex: 3 },
+		)) as any;
+
+		expect(result.error).toBeUndefined();
+		expect(result.newSlideIndex).toBe(3);
+		expect(mock.data.slides).toHaveLength(4);
+	});
+
+	it("errors on out-of-range targetIndex without mutating the deck", async () => {
+		const result = (await processCommand(
+			"cmd-33",
+			"powerpoint_duplicate_slide",
+			{ slideIndex: 0, targetIndex: 99 },
+		)) as any;
+
+		expect(result.error).toContain("out of range");
+		// The deck must be untouched — no stray duplicate left behind.
+		expect(mock.data.slides).toHaveLength(3);
+	});
+
+	it("errors on negative targetIndex without mutating the deck", async () => {
+		const result = (await processCommand(
+			"cmd-34",
+			"powerpoint_duplicate_slide",
+			{ slideIndex: 0, targetIndex: -1 },
+		)) as any;
+
+		expect(result.error).toContain("out of range");
+		expect(mock.data.slides).toHaveLength(3);
+	});
+});
+
+describe("powerpoint_import_slide_internal", () => {
+	it("errors on out-of-range targetIndex without mutating the deck", async () => {
+		const result = (await processCommand(
+			"cmd-35",
+			"powerpoint_import_slide_internal",
+			{ base64: "ZmFrZQ==", targetIndex: 99 },
+		)) as any;
+
+		expect(result.error).toContain("out of range");
+		expect(mock.data.slides).toHaveLength(3);
+	});
+
+	it("accepts targetIndex equal to slide count (append at end)", async () => {
+		const result = (await processCommand(
+			"cmd-36",
+			"powerpoint_import_slide_internal",
+			{ base64: "ZmFrZQ==", targetIndex: 3 },
+		)) as any;
+
+		expect(result.error).toBeUndefined();
+		expect(mock.data.slides).toHaveLength(4);
+	});
+});
+
 // ── ERROR HANDLING ───────────────────────────────────────────────
 
 describe("unknown command", () => {

@@ -415,6 +415,23 @@ public static class McpToolEngine
                 required = new[] { "instanceId", "fromIndex", "toIndex" }
             }
         },
+        new
+        {
+            name = "powerpoint_duplicate_slide",
+            description = "Duplicates a slide, inserting the copy right after the source by default. Undoable via Ctrl+Z. Pass targetInstanceId to copy the slide into a different open presentation instead of duplicating in place.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID of the source presentation, from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "Zero-based index of the slide to duplicate. PowerPoint's own slide numbers (as shown in the UI) are one higher than this index." },
+                    ["targetIndex"] = new { type = "integer", description = "Zero-based slide index where the copy should be placed, in the target presentation (same one as instanceId, unless targetInstanceId is set). PowerPoint's own slide numbers (as shown in the UI) are one higher than this index. If omitted: placed right after the source slide when copying within the same presentation, or appended at the end when copying into a different presentation." },
+                    ["targetInstanceId"] = new { type = "string", description = "Optional instance ID of a different open PowerPoint presentation to copy the slide into." }
+                },
+                required = new[] { "instanceId", "slideIndex" }
+            }
+        },
 
         // ── Word Read tools ───────────────────────────────────────
         new
@@ -926,6 +943,9 @@ public static class McpToolEngine
         "powerpoint_add_slide",
         "powerpoint_delete_slide",
         "powerpoint_move_slide",
+        "powerpoint_duplicate_slide",
+        "powerpoint_export_slide_internal", // internal-only: not in GetToolDefinitions(); used by cross-document duplicate_slide
+        "powerpoint_import_slide_internal", // internal-only: not in GetToolDefinitions(); used by cross-document duplicate_slide
 
         // Word
         "word_get_outline",
@@ -1098,7 +1118,111 @@ public static class McpToolEngine
         if (args.HasValue && args.Value.TryGetProperty("instanceId", out var iid))
             instanceId = iid.GetString();
 
+        if (name == "powerpoint_duplicate_slide" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "targetIndex", "targetInstanceId");
+            if (unknownParamError != null)
+                return unknownParamError;
+
+            if (args.Value.TryGetProperty("targetInstanceId", out var tiid) &&
+                !string.IsNullOrEmpty(tiid.GetString()) &&
+                tiid.GetString() != instanceId)
+            {
+                return await HandleCrossDocumentDuplicateSlide(instanceId, tiid.GetString()!, args.Value);
+            }
+        }
+
         return await DispatchToAddIn(instanceId, name, args);
+    }
+
+    /// <summary>
+    /// Rejects tool calls that pass parameter names outside the given allow-list, instead of
+    /// silently ignoring them. Guards against near-miss parameter names (e.g. "sourceInstanceId"
+    /// instead of "instanceId", "atIndex" instead of "targetIndex") that would otherwise fall
+    /// through to a default and silently do the wrong thing.
+    /// </summary>
+    private static object? ValidateKnownParameters(JsonElement args, string toolName, params string[] allowedKeys)
+    {
+        var allowed = new HashSet<string>(allowedKeys, StringComparer.OrdinalIgnoreCase);
+        var unknown = args.EnumerateObject().Select(p => p.Name).Where(k => !allowed.Contains(k)).ToList();
+        if (unknown.Count == 0)
+            return null;
+
+        return new ToolError(
+            $"Unrecognized parameter(s) for '{toolName}': {string.Join(", ", unknown)}. Accepted parameters: {string.Join(", ", allowedKeys)}.",
+            ErrorCodes.INVALID_PARAMETER,
+            new { toolName, unknownParameters = unknown, acceptedParameters = allowedKeys }
+        ).ToMcpResponse();
+    }
+
+    /// <summary>
+    /// Copies a slide from one open PowerPoint instance into a different one.
+    /// Exports the slide's base64 from the source instance and imports it into the
+    /// target instance, entirely server-side — the base64 payload never reaches the MCP caller.
+    /// </summary>
+    private static async Task<object> HandleCrossDocumentDuplicateSlide(string? sourceInstanceId, string targetInstanceId, JsonElement args)
+    {
+        if (string.IsNullOrEmpty(sourceInstanceId))
+        {
+            return new ToolError(
+                "Missing required parameter: instanceId. Call office_get_active_apps first to get the list of available instances.",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "instanceId" }
+            ).ToMcpResponse();
+        }
+
+        if (_registry.GetInstance(sourceInstanceId) == null)
+        {
+            return new ToolError(
+                $"Instance '{sourceInstanceId}' is not registered or has timed out. Call office_get_active_apps to see current instances.",
+                ErrorCodes.INSTANCE_NOT_FOUND,
+                new { instanceId = sourceInstanceId }
+            ).ToMcpResponse();
+        }
+
+        if (_registry.GetInstance(targetInstanceId) == null)
+        {
+            return new ToolError(
+                $"Instance '{targetInstanceId}' is not registered or has timed out. Call office_get_active_apps to see current instances.",
+                ErrorCodes.INSTANCE_NOT_FOUND,
+                new { instanceId = targetInstanceId }
+            ).ToMcpResponse();
+        }
+
+        int slideIndex = args.TryGetProperty("slideIndex", out var si) ? si.GetInt32() : 0;
+        int? targetIndex = args.TryGetProperty("targetIndex", out var ti) ? ti.GetInt32() : null;
+
+        var exportArgs = JsonSerializer.SerializeToElement(new { instanceId = sourceInstanceId, slideIndex });
+        var exportResult = await DispatchRaw(sourceInstanceId, "powerpoint_export_slide_internal", exportArgs);
+        if (exportResult == null || !exportResult.Success)
+        {
+            return new ToolError(
+                $"Failed to export slide {slideIndex} from instance '{sourceInstanceId}': {exportResult?.Error ?? "timed out"}",
+                exportResult == null ? ErrorCodes.TIMEOUT : ParseErrorCode(exportResult.Error),
+                new { sourceInstanceId, slideIndex }
+            ).ToMcpResponse();
+        }
+
+        var exportPayload = JsonSerializer.SerializeToElement(exportResult.Payload);
+        if (!exportPayload.TryGetProperty("base64", out var base64Prop))
+        {
+            var exportError = exportPayload.TryGetProperty("error", out var e) ? e.GetString() : "no base64 returned";
+            return new ToolError(
+                $"Failed to export slide {slideIndex} from instance '{sourceInstanceId}': {exportError}",
+                ErrorCodes.INVALID_PARAMETER,
+                new { sourceInstanceId, slideIndex }
+            ).ToMcpResponse();
+        }
+
+        var importArgsObj = targetIndex.HasValue
+            ? new { instanceId = targetInstanceId, base64 = base64Prop.GetString(), targetIndex = targetIndex.Value }
+            : (object)new { instanceId = targetInstanceId, base64 = base64Prop.GetString() };
+        var importArgs = JsonSerializer.SerializeToElement(importArgsObj);
+        var importResult = await DispatchRaw(targetInstanceId, "powerpoint_import_slide_internal", importArgs);
+
+        return BuildToolResult(importResult, "powerpoint_duplicate_slide", targetInstanceId,
+            JsonSerializer.Serialize(args));
     }
 
     /// <summary>
@@ -1137,15 +1261,27 @@ public static class McpToolEngine
             ).ToMcpResponse();
         }
 
-        // Dispatch command to add-in
         var inputs = args.HasValue ? JsonSerializer.Serialize(args.Value) : "{}";
+        var result = await DispatchRaw(instanceId, name, args!.Value);
+        return BuildToolResult(result, name, instanceId, inputs);
+    }
+
+    /// <summary>
+    /// Core command dispatch: pushes a command to an instance and awaits its result.
+    /// Returns the raw PendingCommand (or null on timeout) without building an MCP response —
+    /// used both by DispatchToAddIn (public tools) and internal cross-instance chaining
+    /// (e.g. cross-document slide duplication) where an intermediate payload must not be
+    /// surfaced to the MCP caller.
+    /// </summary>
+    private static async Task<PendingCommand?> DispatchRaw(string instanceId, string name, JsonElement args)
+    {
         string commandId = Guid.NewGuid().ToString("N")[..8];
         var cmd = new PendingCommand
         {
             Id = commandId,
             InstanceId = instanceId,
             Command = name,
-            Args = args.HasValue ? JsonSerializer.Deserialize<object>(args.Value) : null,
+            Args = JsonSerializer.Deserialize<object>(args),
             CreatedAt = DateTime.UtcNow,
         };
         _commandStore.AddCommand(cmd);
@@ -1171,12 +1307,11 @@ public static class McpToolEngine
         {
             ToolName = name,
             InstanceId = instanceId,
-            Inputs = inputs,
+            Inputs = JsonSerializer.Serialize(args),
             Outcome = "pending"
         });
 
-        var result = await _commandStore.WaitForResult(commandId, timeoutSeconds: IsImageTool(name) ? 120 : 60);
-        return BuildToolResult(result, name, instanceId, inputs);
+        return await _commandStore.WaitForResult(commandId, timeoutSeconds: IsImageTool(name) ? 120 : 60);
     }
 
     private static object HandleGetActiveApps()

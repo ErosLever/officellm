@@ -87,6 +87,15 @@ export async function processCommand(
 			case "powerpoint_move_slide":
 				result = await handleMoveSlide(args);
 				break;
+			case "powerpoint_duplicate_slide":
+				result = await handleDuplicateSlide(args);
+				break;
+			case "powerpoint_export_slide_internal":
+				result = await handleExportSlideInternal(args);
+				break;
+			case "powerpoint_import_slide_internal":
+				result = await handleImportSlideInternal(args);
+				break;
 
 			// Phase 18: Tags & Metadata
 			case "powerpoint_get_tags":
@@ -1102,6 +1111,159 @@ async function handleMoveSlide(args: unknown): Promise<unknown> {
 		await ctx.sync();
 
 		return { fromIndex, toIndex, slideId };
+	});
+}
+
+async function handleDuplicateSlide(args: unknown): Promise<unknown> {
+	const config = args as { slideIndex?: number; targetIndex?: number };
+	const { slideIndex = 0, targetIndex } = config;
+
+	return runInPowerPoint(async (ctx) => {
+		const PowerPoint: any = (window as any).PowerPoint;
+		const pres = ctx.presentation;
+		pres.load("slides");
+		await ctx.sync();
+
+		const slideCount = pres.slides.items.length;
+		if (slideIndex < 0 || slideIndex >= slideCount) {
+			return { error: `Slide index ${slideIndex} out of range (deck has ${slideCount} slides)` };
+		}
+
+		// Validate before mutating: once the duplicate is inserted the deck has slideCount + 1
+		// slides, so valid target positions are 0..slideCount inclusive (slideCount itself means
+		// "append after the new last slide"). Checking this up front avoids leaving a stray
+		// duplicate behind when the request is rejected.
+		if (targetIndex !== undefined && (targetIndex < 0 || targetIndex > slideCount)) {
+			return { error: `targetIndex ${targetIndex} out of range (deck has ${slideCount} slides; valid range is 0-${slideCount})` };
+		}
+
+		const sourceSlide = pres.slides.items[slideIndex];
+		sourceSlide.load("id");
+		await ctx.sync();
+
+		const exportResult = sourceSlide.exportAsBase64();
+		await ctx.sync();
+
+		const options: any = {
+			formatting: PowerPoint.InsertSlideFormatting.keepSourceFormatting,
+			targetSlideId: sourceSlide.id,
+		};
+
+		pres.insertSlidesFromBase64(exportResult.value, options);
+		await ctx.sync();
+
+		pres.load("slides");
+		await ctx.sync();
+
+		const newSlideIndex = slideIndex + 1;
+		const newSlide = pres.slides.items[newSlideIndex];
+		newSlide.load("id");
+		await ctx.sync();
+		const newSlideId = safeStr(newSlide.id);
+
+		let finalIndex = newSlideIndex;
+		if (targetIndex !== undefined && targetIndex !== newSlideIndex) {
+			finalIndex = Math.max(
+				0,
+				Math.min(targetIndex, pres.slides.items.length - 1),
+			);
+			newSlide.moveTo(finalIndex);
+			await ctx.sync();
+		}
+
+		return {
+			sourceIndex: slideIndex,
+			newSlideIndex: finalIndex,
+			newSlideId,
+		};
+	});
+}
+
+// Internal-only: exports a single slide as base64 for cross-document duplication.
+// Not part of the public tool list — invoked by the server when
+// powerpoint_duplicate_slide targets a different instance.
+async function handleExportSlideInternal(args: unknown): Promise<unknown> {
+	const config = args as { slideIndex?: number };
+	const { slideIndex = 0 } = config;
+
+	return runInPowerPoint(async (ctx) => {
+		const pres = ctx.presentation;
+		pres.load("slides");
+		await ctx.sync();
+
+		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
+			return { error: `Slide index ${slideIndex} out of range` };
+		}
+
+		const sourceSlide = pres.slides.items[slideIndex];
+		const exportResult = sourceSlide.exportAsBase64();
+		await ctx.sync();
+
+		return { base64: exportResult.value };
+	});
+}
+
+// Internal-only: inserts a slide exported by handleExportSlideInternal into this
+// presentation, at targetIndex if given, otherwise appended at the end.
+// Not part of the public tool list — invoked by the server when
+// powerpoint_duplicate_slide targets a different instance.
+async function handleImportSlideInternal(args: unknown): Promise<unknown> {
+	const config = args as { base64?: string; targetIndex?: number };
+	const { base64, targetIndex } = config;
+
+	if (!base64) {
+		return { error: "Missing base64 slide data" };
+	}
+
+	return runInPowerPoint(async (ctx) => {
+		const PowerPoint: any = (window as any).PowerPoint;
+		const pres = ctx.presentation;
+		pres.load("slides");
+		await ctx.sync();
+
+		const beforeCount = pres.slides.items.length;
+
+		// Validate before mutating: once the slide is inserted the deck has beforeCount + 1
+		// slides, so valid target positions are 0..beforeCount inclusive (beforeCount itself
+		// means "append after the new last slide"). Checking this up front avoids leaving a
+		// stray imported slide behind when the request is rejected.
+		if (targetIndex !== undefined && (targetIndex < 0 || targetIndex > beforeCount)) {
+			return { error: `targetIndex ${targetIndex} out of range (target deck has ${beforeCount} slides; valid range is 0-${beforeCount})` };
+		}
+
+		const options: any = {
+			formatting: PowerPoint.InsertSlideFormatting.keepSourceFormatting,
+		};
+		if (beforeCount > 0) {
+			const lastSlide = pres.slides.items[beforeCount - 1];
+			lastSlide.load("id");
+			await ctx.sync();
+			options.targetSlideId = lastSlide.id;
+		}
+
+		pres.insertSlidesFromBase64(base64, options);
+		await ctx.sync();
+
+		pres.load("slides");
+		await ctx.sync();
+
+		const newSlideIndex = beforeCount;
+		const newSlide = pres.slides.items[newSlideIndex];
+		newSlide.load("id");
+		await ctx.sync();
+		const newSlideId = safeStr(newSlide.id);
+
+		let finalIndex = newSlideIndex;
+		if (targetIndex !== undefined && targetIndex !== newSlideIndex) {
+			finalIndex = Math.max(
+				0,
+				Math.min(targetIndex, pres.slides.items.length - 1),
+			);
+			newSlide.moveTo(finalIndex);
+			await ctx.sync();
+		}
+
+		return { newSlideIndex: finalIndex, newSlideId };
 	});
 }
 

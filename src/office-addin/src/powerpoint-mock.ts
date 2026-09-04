@@ -102,6 +102,10 @@ export class PowerPointMock {
 				group: "Group",
 				line: "Line",
 			},
+			InsertSlideFormatting: {
+				keepSourceFormatting: "KeepSourceFormatting",
+				useDestinationTheme: "UseDestinationTheme",
+			},
 		};
 
 		(globalThis as any).Office = {
@@ -191,13 +195,30 @@ class MockPresentation {
 	getSelectedTextRange() {
 		throw new Error("No text selected");
 	}
+
+	insertSlidesFromBase64(_base64File: string, options?: any) {
+		this._ctx.queueAction(() => {
+			const data = this.slides._data;
+			const targetSlideId = options?.targetSlideId;
+			const insertAt = targetSlideId
+				? data.findIndex((s) => s.id === targetSlideId) + 1
+				: 0;
+			const newSlide: MockSlideData = {
+				id: `slide_dup_${data.length}`,
+				shapes: [],
+				notes: "",
+			};
+			data.splice(insertAt, 0, newSlide);
+			this.slides._rebuild();
+		});
+	}
 }
 
 // ── Mock Slide Collection ───────────────────────────────────────
 
 class MockSlideCollection {
 	private _ctx: MockContext;
-	private _data: MockSlideData[];
+	_data: MockSlideData[];
 	items: MockSlide[];
 
 	constructor(ctx: MockContext, data: MockSlideData[]) {
@@ -214,6 +235,10 @@ class MockSlideCollection {
 		};
 		this._data.push(newSlide);
 		this.items.push(new MockSlide(this._ctx, newSlide, this._data.length - 1));
+	}
+
+	_rebuild() {
+		this.items = this._data.map((s, i) => new MockSlide(this._ctx, s, i));
 	}
 
 	_populate() {
@@ -253,6 +278,12 @@ class MockSlide {
 		const fakePng =
 			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 		const result = new ClientResult(`data:image/png;base64,${fakePng}`);
+		this._ctx.queueLoad(result, []);
+		return result;
+	}
+
+	exportAsBase64(): ClientResult<string> {
+		const result = new ClientResult("fake-slide-export-base64");
 		this._ctx.queueLoad(result, []);
 		return result;
 	}

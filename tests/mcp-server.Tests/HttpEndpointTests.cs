@@ -181,6 +181,7 @@ public class HttpEndpointTests : IClassFixture<WebApplicationFactory<Program>>
             "/api/powerpoint_add_slide",
             "/api/powerpoint_delete_slide",
             "/api/powerpoint_move_slide",
+            "/api/powerpoint_duplicate_slide",
 
             // Word
             "/api/word_get_outline",
@@ -416,7 +417,7 @@ public class HttpEndpointTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task Mcp_ToolsList_Returns129Tools()
+    public async Task Mcp_ToolsList_Returns130Tools()
     {
         // Initialize first
         await _client.PostAsJsonAsync("/mcp", new
@@ -436,7 +437,7 @@ public class HttpEndpointTests : IClassFixture<WebApplicationFactory<Program>>
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         var tools = body.GetProperty("result").GetProperty("tools");
-        Assert.Equal(129, tools.GetArrayLength());
+        Assert.Equal(130, tools.GetArrayLength());
     }
 
     [Fact]
@@ -459,7 +460,8 @@ public class HttpEndpointTests : IClassFixture<WebApplicationFactory<Program>>
             "powerpoint_get_speaker_notes", "powerpoint_update_shape_properties",
             "powerpoint_add_textbox", "powerpoint_add_image",
             "powerpoint_add_table", "powerpoint_delete_shape",
-            "powerpoint_add_slide", "powerpoint_delete_slide", "powerpoint_move_slide"
+            "powerpoint_add_slide", "powerpoint_delete_slide", "powerpoint_move_slide",
+            "powerpoint_duplicate_slide"
         };
 
         foreach (var toolName in newToolNames)
@@ -481,6 +483,7 @@ public class HttpEndpointTests : IClassFixture<WebApplicationFactory<Program>>
     [InlineData("powerpoint_add_slide", null)]
     [InlineData("powerpoint_delete_slide", "slideIndex")]
     [InlineData("powerpoint_move_slide", "fromIndex,toIndex")]
+    [InlineData("powerpoint_duplicate_slide", "slideIndex")]
     public async Task Mcp_NewTools_RequireInstanceId(string toolName, string? otherRequired)
     {
         // Calling without instanceId should return error

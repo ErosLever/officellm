@@ -19,6 +19,7 @@ import { processCommand as processPptCommand } from "./powerpoint-commands";
 import { processCommand as processWordCommand } from "./word-commands";
 import { processCommand as processExcelCommand } from "./excel-commands";
 import { processCommand as processOutlookCommand } from "./outlook-commands";
+import { runSerialized } from "./command-queue";
 
 // --- Host-aware command dispatch ---
 const HOST_DISPATCH: Record<string, typeof processPptCommand> = {
@@ -84,7 +85,9 @@ async function initWithMcp(): Promise<void> {
 		// Set up command handler for SignalR
 		setCommandHandler(async (commandId, commandName, args) => {
 			addLogEntry(`[SignalR] Executing: ${commandName}`);
-			const result = await processCommand(commandId, commandName, args);
+			const result = await runSerialized(() =>
+				processCommand(commandId, commandName, args),
+			);
 			addLogEntry(`[SignalR] Command ${commandId} completed`);
 			return result;
 		});
@@ -203,7 +206,9 @@ async function processPendingCommands(): Promise<void> {
 		for (const cmd of commands) {
 			addLogEntry(`Executing: ${cmd.command}`);
 			try {
-				const result = await processCommand(cmd.id, cmd.command, cmd.args);
+				const result = await runSerialized(() =>
+					processCommand(cmd.id, cmd.command, cmd.args),
+				);
 				const success = !(result && typeof result === "object" && "error" in (result as any));
 				const error = success ? undefined : ((result as any).error as string);
 				await reportResult(cmd.id, success, error, result);

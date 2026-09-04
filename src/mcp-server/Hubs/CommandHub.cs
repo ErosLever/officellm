@@ -26,7 +26,12 @@ public class CommandHub : Hub
     public Task ReportResult(string commandId, bool success, string? error, object? payload)
     {
         var commandStore = McpToolEngine.GetCommandStore();
-        Console.WriteLine($"SignalR: Result received for command {commandId}: success={success}");
+        var cmd = commandStore.TryGetCommand(commandId);
+        var toolName = cmd?.Command ?? "unknown";
+        var docName = cmd != null ? McpToolEngine.GetRegistry().GetInstance(cmd.InstanceId)?.DocumentName : null;
+        var docLabel = string.IsNullOrEmpty(docName) ? (cmd?.InstanceId ?? "unknown") : docName;
+        var outcome = success ? "succeeded" : $"failed ({error})";
+        Console.WriteLine($"SignalR: '{toolName}' on '{docLabel}' {outcome}");
         commandStore.CompleteCommand(commandId, success, error ?? "", payload);
         return Task.CompletedTask;
     }

@@ -79,8 +79,15 @@ public static class AppBuilder
             });
         });
 
-        // SignalR for real-time command delivery
-        builder.Services.AddSignalR();
+        // SignalR for real-time command delivery.
+        // Default MaximumReceiveMessageSize is 32KB, which is too small for large
+        // tool results (e.g. a full deck outline or document map) sent back via
+        // ReportResult — raise it to accommodate big payloads on this trusted,
+        // loopback-only connection.
+        builder.Services.AddSignalR(options =>
+        {
+            options.MaximumReceiveMessageSize = 20 * 1024 * 1024; // 20MB
+        });
 
         var app = builder.Build();
         app.UseCors("AllowedOrigins");

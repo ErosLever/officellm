@@ -11,12 +11,12 @@ public class McpToolEngineTests
 	}
 
     [Fact]
-    public void GetToolDefinitions_Returns129Tools()
+    public void GetToolDefinitions_Returns130Tools()
     {
         var tools = McpToolEngine.GetToolDefinitions();
 
         Assert.NotNull(tools);
-        Assert.Equal(129, tools.Length);
+        Assert.Equal(130, tools.Length);
     }
 
     [Fact]
@@ -57,6 +57,7 @@ public class McpToolEngineTests
         Assert.Contains("powerpoint_add_slide", names);
         Assert.Contains("powerpoint_delete_slide", names);
         Assert.Contains("powerpoint_move_slide", names);
+        Assert.Contains("powerpoint_duplicate_slide", names);
 
         // Word tools
         Assert.Contains("word_get_outline", names);
@@ -314,5 +315,54 @@ public class McpToolEngineTests
 
         Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
         Assert.Equal("INVALID_PARAMETER", errorObj.GetProperty("errorCode").GetString());
+    }
+
+    [Fact]
+    public async Task DuplicateSlide_UnrecognizedParameter_ReturnsErrorAndDoesNotDispatch()
+    {
+        // Regression test: a caller using near-miss parameter names like
+        // "sourceInstanceId"/"atIndex" instead of "instanceId"/"targetIndex" must get a
+        // clear rejection instead of silently falling through to a same-document duplicate.
+        McpToolEngine.ResetForTesting();
+        var registry = McpToolEngine.GetRegistry();
+        var iid = registry.RegisterInstance("PowerPoint", "test.pptx");
+
+        var args = JsonSerializer.Deserialize<JsonElement>(
+            $"{{\"instanceId\": \"{iid}\", \"slideIndex\": 0, \"sourceInstanceId\": \"other\", \"atIndex\": 5}}");
+        var result = await McpToolEngine.ExecuteTool("powerpoint_duplicate_slide", args);
+
+        var json = JsonSerializer.Serialize(result);
+        var doc = JsonDocument.Parse(json);
+        var content = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString();
+        var errorObj = JsonDocument.Parse(content!).RootElement;
+
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.Equal("INVALID_PARAMETER", errorObj.GetProperty("errorCode").GetString());
+        var unknown = errorObj.GetProperty("details").GetProperty("unknownParameters")
+            .EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("sourceInstanceId", unknown);
+        Assert.Contains("atIndex", unknown);
+    }
+
+    [Fact]
+    public async Task DuplicateSlide_KnownParametersOnly_DoesNotReturnUnrecognizedParameterError()
+    {
+        // Uses an unregistered instanceId (rather than a real one) so DispatchToAddIn's
+        // INSTANCE_NOT_FOUND check short-circuits before the 60s add-in response wait —
+        // the point of this test is only to confirm known params clear the
+        // ValidateKnownParameters gate, not to exercise the dispatch wait itself.
+        McpToolEngine.ResetForTesting();
+
+        var args = JsonSerializer.Deserialize<JsonElement>(
+            "{\"instanceId\": \"nonexistent_99\", \"slideIndex\": 0, \"targetIndex\": 1}");
+        var result = await McpToolEngine.ExecuteTool("powerpoint_duplicate_slide", args);
+
+        var json = JsonSerializer.Serialize(result);
+        var doc = JsonDocument.Parse(json);
+        var content = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString();
+        var errorObj = JsonDocument.Parse(content!).RootElement;
+
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.Equal("INSTANCE_NOT_FOUND", errorObj.GetProperty("errorCode").GetString());
     }
 }
