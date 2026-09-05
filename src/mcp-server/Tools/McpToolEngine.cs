@@ -251,7 +251,7 @@ public static class McpToolEngine
         new
         {
             name = "powerpoint_update_shape_properties",
-            description = "Updates position, size, rotation, and/or font properties of a shape. Only specified properties are changed. Use this to resize, reposition, or restyle shapes.",
+            description = "Updates position, size, rotation, font, paragraph/bullet, and text frame properties of a shape. Only specified properties are changed. Use this to resize, reposition, or restyle shapes, including bullet/numbered lists, indent level, alignment, and text frame margins/wrap/autosize.",
             inputSchema = new
             {
                 type = "object",
@@ -269,7 +269,26 @@ public static class McpToolEngine
                     ["fontSize"] = new { type = "number", description = "Font size in points" },
                     ["bold"] = new { type = "boolean", description = "Bold on/off" },
                     ["italic"] = new { type = "boolean", description = "Italic on/off" },
-                    ["color"] = new { type = "string", description = "Font color as HTML hex (e.g. '#FF0000')" }
+                    ["color"] = new { type = "string", description = "Font color as HTML hex (e.g. '#FF0000')" },
+                    ["underline"] = new { type = "string", description = "Underline style, e.g. 'Single', 'None'." },
+                    ["strikethrough"] = new { type = "boolean", description = "Single strikethrough on/off." },
+                    ["doubleStrikethrough"] = new { type = "boolean", description = "Double strikethrough on/off." },
+                    ["allCaps"] = new { type = "boolean", description = "All-caps text on/off." },
+                    ["smallCaps"] = new { type = "boolean", description = "Small-caps text on/off." },
+                    ["subscript"] = new { type = "boolean", description = "Subscript on/off." },
+                    ["superscript"] = new { type = "boolean", description = "Superscript on/off." },
+                    ["horizontalAlignment"] = new { type = "string", description = "Paragraph horizontal alignment: 'Left', 'Center', 'Right', 'Justify', 'JustifyLow', 'Distributed', 'ThaiDistributed'." },
+                    ["indentLevel"] = new { type = "number", description = "Paragraph indent level. Requires PowerPointApi 1.10 — supported on Windows only (Microsoft 365 Version 2601, Build 19610.20002+), not on Mac or web." },
+                    ["bulletType"] = new { type = "string", description = "Bullet type: 'None', 'Numbered', 'Unnumbered'. Requires PowerPointApi 1.10 — Windows only, not supported on Mac or web." },
+                    ["bulletStyle"] = new { type = "string", description = "Bullet style, e.g. 'ArabicNumeralPeriod', 'RomanUppercasePeriod' (see Office JS PowerPoint.BulletStyle enum for the full list). Requires PowerPointApi 1.10 — Windows only, not supported on Mac or web." },
+                    ["bulletVisible"] = new { type = "boolean", description = "Whether the bullet/number is shown for the paragraph." },
+                    ["textMarginTop"] = new { type = "number", description = "Text frame top inset margin in points." },
+                    ["textMarginBottom"] = new { type = "number", description = "Text frame bottom inset margin in points." },
+                    ["textMarginLeft"] = new { type = "number", description = "Text frame left inset margin in points." },
+                    ["textMarginRight"] = new { type = "number", description = "Text frame right inset margin in points." },
+                    ["autoSizeSetting"] = new { type = "string", description = "Text frame autosize behavior: 'AutoSizeNone', 'AutoSizeTextToFitShape', 'AutoSizeShapeToFitText', 'AutoSizeMixed'." },
+                    ["wordWrap"] = new { type = "boolean", description = "Whether text wraps within the shape's text frame." },
+                    ["verticalAlignment"] = new { type = "string", description = "Text frame vertical alignment: 'Top', 'Middle', 'Bottom', 'TopCentered', 'MiddleCentered', 'BottomCentered'." }
                 },
                 required = new[] { "instanceId", "slideIndex", "shapeId" }
             }
@@ -1159,6 +1178,21 @@ public static class McpToolEngine
         {
             var unknownParamError = ValidateKnownParameters(args.Value, name,
                 "instanceId", "slideIndex", "layoutId", "slideMasterId");
+            if (unknownParamError != null)
+                return unknownParamError;
+        }
+
+        if (name == "powerpoint_update_shape_properties" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "shapeId",
+                "left", "top", "width", "height", "rotation",
+                "fontName", "fontSize", "bold", "italic", "color",
+                "underline", "strikethrough", "doubleStrikethrough", "allCaps", "smallCaps", "subscript", "superscript",
+                "horizontalAlignment", "indentLevel",
+                "bulletType", "bulletStyle", "bulletVisible",
+                "textMarginTop", "textMarginBottom", "textMarginLeft", "textMarginRight",
+                "autoSizeSetting", "wordWrap", "verticalAlignment");
             if (unknownParamError != null)
                 return unknownParamError;
         }

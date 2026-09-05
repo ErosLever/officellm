@@ -754,6 +754,25 @@ async function handleUpdateShapeProperties(args: unknown): Promise<unknown> {
 		bold?: boolean;
 		italic?: boolean;
 		color?: string;
+		underline?: string;
+		strikethrough?: boolean;
+		doubleStrikethrough?: boolean;
+		allCaps?: boolean;
+		smallCaps?: boolean;
+		subscript?: boolean;
+		superscript?: boolean;
+		horizontalAlignment?: string;
+		indentLevel?: number;
+		bulletType?: string;
+		bulletStyle?: string;
+		bulletVisible?: boolean;
+		textMarginTop?: number;
+		textMarginBottom?: number;
+		textMarginLeft?: number;
+		textMarginRight?: number;
+		autoSizeSetting?: string;
+		wordWrap?: boolean;
+		verticalAlignment?: string;
 	};
 	const { slideIndex = 0, shapeId = "" } = config;
 
@@ -806,13 +825,32 @@ async function handleUpdateShapeProperties(args: unknown): Promise<unknown> {
 			updated.push("rotation");
 		}
 
-		// Font properties
+		// Font, paragraph/bullet, and text frame properties
 		if (
 			config.fontName !== undefined ||
 			config.fontSize !== undefined ||
 			config.bold !== undefined ||
 			config.italic !== undefined ||
-			config.color !== undefined
+			config.color !== undefined ||
+			config.underline !== undefined ||
+			config.strikethrough !== undefined ||
+			config.doubleStrikethrough !== undefined ||
+			config.allCaps !== undefined ||
+			config.smallCaps !== undefined ||
+			config.subscript !== undefined ||
+			config.superscript !== undefined ||
+			config.horizontalAlignment !== undefined ||
+			config.indentLevel !== undefined ||
+			config.bulletType !== undefined ||
+			config.bulletStyle !== undefined ||
+			config.bulletVisible !== undefined ||
+			config.textMarginTop !== undefined ||
+			config.textMarginBottom !== undefined ||
+			config.textMarginLeft !== undefined ||
+			config.textMarginRight !== undefined ||
+			config.autoSizeSetting !== undefined ||
+			config.wordWrap !== undefined ||
+			config.verticalAlignment !== undefined
 		) {
 			const tf = shape.getTextFrameOrNullObject();
 			ctx.load(tf, "isNullObject");
@@ -839,6 +877,87 @@ async function handleUpdateShapeProperties(args: unknown): Promise<unknown> {
 				if (config.color !== undefined) {
 					font.color = config.color;
 					updated.push("color");
+				}
+				if (config.underline !== undefined) {
+					font.underline = config.underline as any;
+					updated.push("underline");
+				}
+				if (config.strikethrough !== undefined) {
+					font.strikethrough = config.strikethrough;
+					updated.push("strikethrough");
+				}
+				if (config.doubleStrikethrough !== undefined) {
+					font.doubleStrikethrough = config.doubleStrikethrough;
+					updated.push("doubleStrikethrough");
+				}
+				if (config.allCaps !== undefined) {
+					font.allCaps = config.allCaps;
+					updated.push("allCaps");
+				}
+				if (config.smallCaps !== undefined) {
+					font.smallCaps = config.smallCaps;
+					updated.push("smallCaps");
+				}
+				if (config.subscript !== undefined) {
+					font.subscript = config.subscript;
+					updated.push("subscript");
+				}
+				if (config.superscript !== undefined) {
+					font.superscript = config.superscript;
+					updated.push("superscript");
+				}
+
+				const pf = tf.textRange.paragraphFormat;
+				if (config.horizontalAlignment !== undefined) {
+					pf.horizontalAlignment = config.horizontalAlignment as any;
+					updated.push("horizontalAlignment");
+				}
+				if (config.indentLevel !== undefined) {
+					pf.indentLevel = config.indentLevel;
+					updated.push("indentLevel");
+				}
+
+				const bf = pf.bulletFormat;
+				if (config.bulletType !== undefined) {
+					bf.type = config.bulletType as any;
+					updated.push("bulletType");
+				}
+				if (config.bulletStyle !== undefined) {
+					bf.style = config.bulletStyle as any;
+					updated.push("bulletStyle");
+				}
+				if (config.bulletVisible !== undefined) {
+					bf.visible = config.bulletVisible;
+					updated.push("bulletVisible");
+				}
+
+				if (config.textMarginTop !== undefined) {
+					tf.topMargin = config.textMarginTop;
+					updated.push("textMarginTop");
+				}
+				if (config.textMarginBottom !== undefined) {
+					tf.bottomMargin = config.textMarginBottom;
+					updated.push("textMarginBottom");
+				}
+				if (config.textMarginLeft !== undefined) {
+					tf.leftMargin = config.textMarginLeft;
+					updated.push("textMarginLeft");
+				}
+				if (config.textMarginRight !== undefined) {
+					tf.rightMargin = config.textMarginRight;
+					updated.push("textMarginRight");
+				}
+				if (config.autoSizeSetting !== undefined) {
+					tf.autoSizeSetting = config.autoSizeSetting as any;
+					updated.push("autoSizeSetting");
+				}
+				if (config.wordWrap !== undefined) {
+					tf.wordWrap = config.wordWrap;
+					updated.push("wordWrap");
+				}
+				if (config.verticalAlignment !== undefined) {
+					tf.verticalAlignment = config.verticalAlignment as any;
+					updated.push("verticalAlignment");
 				}
 			}
 		}

@@ -233,6 +233,37 @@ public class McpToolEngineTests
     }
 
     [Fact]
+    public void GetToolDefinitions_UpdateShapePropertiesHasFormattingParams()
+    {
+        var tools = McpToolEngine.GetToolDefinitions();
+        var tool = tools.First(t =>
+        {
+            var json = JsonSerializer.Serialize(t);
+            var doc = JsonDocument.Parse(json);
+            return doc.RootElement.GetProperty("name").GetString() == "powerpoint_update_shape_properties";
+        });
+
+        var json2 = JsonSerializer.Serialize(tool);
+        var props = JsonDocument.Parse(json2).RootElement
+            .GetProperty("inputSchema")
+            .GetProperty("properties");
+
+        string[] expectedKeys =
+        [
+            "underline", "strikethrough", "doubleStrikethrough", "allCaps", "smallCaps", "subscript", "superscript",
+            "horizontalAlignment", "indentLevel",
+            "bulletType", "bulletStyle", "bulletVisible",
+            "textMarginTop", "textMarginBottom", "textMarginLeft", "textMarginRight",
+            "autoSizeSetting", "wordWrap", "verticalAlignment",
+        ];
+
+        foreach (var key in expectedKeys)
+        {
+            Assert.True(props.TryGetProperty(key, out _), $"powerpoint_update_shape_properties schema missing '{key}'");
+        }
+    }
+
+    [Fact]
     public async Task ExecuteTool_NoInstances_ReturnsEmptyApps()
     {
         var result = await McpToolEngine.ExecuteTool("office_get_active_apps", null);

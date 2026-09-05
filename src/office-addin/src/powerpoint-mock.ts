@@ -33,6 +33,29 @@ export interface MockShapeData {
 		bold?: boolean;
 		italic?: boolean;
 		color?: string;
+		underline?: string;
+		strikethrough?: boolean;
+		doubleStrikethrough?: boolean;
+		allCaps?: boolean;
+		smallCaps?: boolean;
+		subscript?: boolean;
+		superscript?: boolean;
+	};
+	paragraphFormat?: {
+		horizontalAlignment?: string;
+		indentLevel?: number;
+		bulletType?: string;
+		bulletStyle?: string;
+		bulletVisible?: boolean;
+	};
+	textFrame?: {
+		marginTop?: number;
+		marginBottom?: number;
+		marginLeft?: number;
+		marginRight?: number;
+		autoSizeSetting?: string;
+		wordWrap?: boolean;
+		verticalAlignment?: string;
 	};
 	fillColor?: string;
 	fillTransparency?: number;
@@ -737,7 +760,12 @@ class MockShape {
 		const hasText = this._data.text !== undefined;
 		return new MockTextFrame(
 			this._ctx,
-			{ text: this._data.text ?? "", font: this._data.font },
+			{
+				text: this._data.text ?? "",
+				font: this._data.font,
+				paragraphFormat: this._data.paragraphFormat,
+				textFrame: this._data.textFrame,
+			},
 			hasText,
 		);
 	}
@@ -779,24 +807,115 @@ class MockFill {
 
 // ── Mock TextFrame ──────────────────────────────────────────────
 
+type TextFrameBackingData = {
+	text: string;
+	font?: MockShapeData["font"];
+	paragraphFormat?: MockShapeData["paragraphFormat"];
+	textFrame?: MockShapeData["textFrame"];
+};
+
 class MockTextFrame {
 	private _ctx: MockContext;
-	private _data: { text: string; font?: MockShapeData["font"] };
+	private _data: TextFrameBackingData;
 	isNullObject: boolean;
 	textRange: MockTextRange;
 
-	constructor(
-		ctx: MockContext,
-		data: { text: string; font?: MockShapeData["font"] },
-		hasText: boolean,
-	) {
+	private _topMargin = 0;
+	private _bottomMargin = 0;
+	private _leftMargin = 0;
+	private _rightMargin = 0;
+	private _autoSizeSetting = "AutoSizeNone";
+	private _wordWrap = true;
+	private _verticalAlignment = "Top";
+
+	constructor(ctx: MockContext, data: TextFrameBackingData, hasText: boolean) {
 		this._ctx = ctx;
 		this._data = data;
 		this.isNullObject = !hasText;
 		this.textRange = new MockTextRange(ctx, data);
 	}
 
+	get topMargin() {
+		return this._topMargin;
+	}
+	get bottomMargin() {
+		return this._bottomMargin;
+	}
+	get leftMargin() {
+		return this._leftMargin;
+	}
+	get rightMargin() {
+		return this._rightMargin;
+	}
+	get autoSizeSetting() {
+		return this._autoSizeSetting;
+	}
+	get wordWrap() {
+		return this._wordWrap;
+	}
+	get verticalAlignment() {
+		return this._verticalAlignment;
+	}
+
+	set topMargin(v: number) {
+		this._ctx.queueAction(() => {
+			if (!this._data.textFrame) this._data.textFrame = {};
+			this._data.textFrame.marginTop = v;
+			this._topMargin = v;
+		});
+	}
+	set bottomMargin(v: number) {
+		this._ctx.queueAction(() => {
+			if (!this._data.textFrame) this._data.textFrame = {};
+			this._data.textFrame.marginBottom = v;
+			this._bottomMargin = v;
+		});
+	}
+	set leftMargin(v: number) {
+		this._ctx.queueAction(() => {
+			if (!this._data.textFrame) this._data.textFrame = {};
+			this._data.textFrame.marginLeft = v;
+			this._leftMargin = v;
+		});
+	}
+	set rightMargin(v: number) {
+		this._ctx.queueAction(() => {
+			if (!this._data.textFrame) this._data.textFrame = {};
+			this._data.textFrame.marginRight = v;
+			this._rightMargin = v;
+		});
+	}
+	set autoSizeSetting(v: string) {
+		this._ctx.queueAction(() => {
+			if (!this._data.textFrame) this._data.textFrame = {};
+			this._data.textFrame.autoSizeSetting = v;
+			this._autoSizeSetting = v;
+		});
+	}
+	set wordWrap(v: boolean) {
+		this._ctx.queueAction(() => {
+			if (!this._data.textFrame) this._data.textFrame = {};
+			this._data.textFrame.wordWrap = v;
+			this._wordWrap = v;
+		});
+	}
+	set verticalAlignment(v: string) {
+		this._ctx.queueAction(() => {
+			if (!this._data.textFrame) this._data.textFrame = {};
+			this._data.textFrame.verticalAlignment = v;
+			this._verticalAlignment = v;
+		});
+	}
+
 	_populate(props: string[]) {
+		const tfData = this._data.textFrame;
+		this._topMargin = tfData?.marginTop ?? 0;
+		this._bottomMargin = tfData?.marginBottom ?? 0;
+		this._leftMargin = tfData?.marginLeft ?? 0;
+		this._rightMargin = tfData?.marginRight ?? 0;
+		this._autoSizeSetting = tfData?.autoSizeSetting ?? "AutoSizeNone";
+		this._wordWrap = tfData?.wordWrap ?? true;
+		this._verticalAlignment = tfData?.verticalAlignment ?? "Top";
 		this.textRange._populate(props);
 	}
 }
@@ -805,18 +924,17 @@ class MockTextFrame {
 
 class MockTextRange {
 	private _ctx: MockContext;
-	private _data: { text: string; font?: MockShapeData["font"] };
+	private _data: TextFrameBackingData;
 	private _text: string;
 	font: MockFont;
+	paragraphFormat: MockParagraphFormat;
 
-	constructor(
-		ctx: MockContext,
-		data: { text: string; font?: MockShapeData["font"] },
-	) {
+	constructor(ctx: MockContext, data: TextFrameBackingData) {
 		this._ctx = ctx;
 		this._data = data;
 		this._text = data.text;
 		this.font = new MockFont(ctx, data);
+		this.paragraphFormat = new MockParagraphFormat(ctx, data);
 	}
 
 	get text() {
@@ -831,6 +949,7 @@ class MockTextRange {
 
 	_populate(props: string[]) {
 		this.font._populate(props);
+		this.paragraphFormat._populate(props);
 	}
 }
 
@@ -838,17 +957,21 @@ class MockTextRange {
 
 class MockFont {
 	private _ctx: MockContext;
-	private _data: { text: string; font?: MockShapeData["font"] };
+	private _data: TextFrameBackingData;
 	private _name = "";
 	private _size = 0;
 	private _bold = false;
 	private _italic = false;
 	private _color = "";
+	private _underline = "None";
+	private _strikethrough = false;
+	private _doubleStrikethrough = false;
+	private _allCaps = false;
+	private _smallCaps = false;
+	private _subscript = false;
+	private _superscript = false;
 
-	constructor(
-		ctx: MockContext,
-		data: { text: string; font?: MockShapeData["font"] },
-	) {
+	constructor(ctx: MockContext, data: TextFrameBackingData) {
 		this._ctx = ctx;
 		this._data = data;
 	}
@@ -867,6 +990,27 @@ class MockFont {
 	}
 	get color() {
 		return this._color;
+	}
+	get underline() {
+		return this._underline;
+	}
+	get strikethrough() {
+		return this._strikethrough;
+	}
+	get doubleStrikethrough() {
+		return this._doubleStrikethrough;
+	}
+	get allCaps() {
+		return this._allCaps;
+	}
+	get smallCaps() {
+		return this._smallCaps;
+	}
+	get subscript() {
+		return this._subscript;
+	}
+	get superscript() {
+		return this._superscript;
 	}
 
 	set name(v) {
@@ -899,6 +1043,55 @@ class MockFont {
 			this._color = v;
 		});
 	}
+	set underline(v: string) {
+		this._ctx.queueAction(() => {
+			if (!this._data.font) this._data.font = {};
+			this._data.font.underline = v;
+			this._underline = v;
+		});
+	}
+	set strikethrough(v: boolean) {
+		this._ctx.queueAction(() => {
+			if (!this._data.font) this._data.font = {};
+			this._data.font.strikethrough = v;
+			this._strikethrough = v;
+		});
+	}
+	set doubleStrikethrough(v: boolean) {
+		this._ctx.queueAction(() => {
+			if (!this._data.font) this._data.font = {};
+			this._data.font.doubleStrikethrough = v;
+			this._doubleStrikethrough = v;
+		});
+	}
+	set allCaps(v: boolean) {
+		this._ctx.queueAction(() => {
+			if (!this._data.font) this._data.font = {};
+			this._data.font.allCaps = v;
+			this._allCaps = v;
+		});
+	}
+	set smallCaps(v: boolean) {
+		this._ctx.queueAction(() => {
+			if (!this._data.font) this._data.font = {};
+			this._data.font.smallCaps = v;
+			this._smallCaps = v;
+		});
+	}
+	set subscript(v: boolean) {
+		this._ctx.queueAction(() => {
+			if (!this._data.font) this._data.font = {};
+			this._data.font.subscript = v;
+			this._subscript = v;
+		});
+	}
+	set superscript(v: boolean) {
+		this._ctx.queueAction(() => {
+			if (!this._data.font) this._data.font = {};
+			this._data.font.superscript = v;
+			this._superscript = v;
+		});
+	}
 
 	_populate(props: string[]) {
 		const f = this._data.font;
@@ -907,6 +1100,110 @@ class MockFont {
 		this._bold = f?.bold ?? false;
 		this._italic = f?.italic ?? false;
 		this._color = f?.color ?? "";
+		this._underline = f?.underline ?? "None";
+		this._strikethrough = f?.strikethrough ?? false;
+		this._doubleStrikethrough = f?.doubleStrikethrough ?? false;
+		this._allCaps = f?.allCaps ?? false;
+		this._smallCaps = f?.smallCaps ?? false;
+		this._subscript = f?.subscript ?? false;
+		this._superscript = f?.superscript ?? false;
+	}
+}
+
+// ── Mock ParagraphFormat / BulletFormat ──────────────────────────
+
+class MockBulletFormat {
+	private _ctx: MockContext;
+	private _data: TextFrameBackingData;
+	private _type = "None";
+	private _style = "None";
+	private _visible = false;
+
+	constructor(ctx: MockContext, data: TextFrameBackingData) {
+		this._ctx = ctx;
+		this._data = data;
+	}
+
+	get type() {
+		return this._type;
+	}
+	get style() {
+		return this._style;
+	}
+	get visible() {
+		return this._visible;
+	}
+
+	set type(v: string) {
+		this._ctx.queueAction(() => {
+			if (!this._data.paragraphFormat) this._data.paragraphFormat = {};
+			this._data.paragraphFormat.bulletType = v;
+			this._type = v;
+		});
+	}
+	set style(v: string) {
+		this._ctx.queueAction(() => {
+			if (!this._data.paragraphFormat) this._data.paragraphFormat = {};
+			this._data.paragraphFormat.bulletStyle = v;
+			this._style = v;
+		});
+	}
+	set visible(v: boolean) {
+		this._ctx.queueAction(() => {
+			if (!this._data.paragraphFormat) this._data.paragraphFormat = {};
+			this._data.paragraphFormat.bulletVisible = v;
+			this._visible = v;
+		});
+	}
+
+	_populate() {
+		const pf = this._data.paragraphFormat;
+		this._type = pf?.bulletType ?? "None";
+		this._style = pf?.bulletStyle ?? "None";
+		this._visible = pf?.bulletVisible ?? false;
+	}
+}
+
+class MockParagraphFormat {
+	private _ctx: MockContext;
+	private _data: TextFrameBackingData;
+	private _horizontalAlignment = "Left";
+	private _indentLevel = 0;
+	bulletFormat: MockBulletFormat;
+
+	constructor(ctx: MockContext, data: TextFrameBackingData) {
+		this._ctx = ctx;
+		this._data = data;
+		this.bulletFormat = new MockBulletFormat(ctx, data);
+	}
+
+	get horizontalAlignment() {
+		return this._horizontalAlignment;
+	}
+	get indentLevel() {
+		return this._indentLevel;
+	}
+
+	set horizontalAlignment(v: string) {
+		this._ctx.queueAction(() => {
+			if (!this._data.paragraphFormat) this._data.paragraphFormat = {};
+			this._data.paragraphFormat.horizontalAlignment = v;
+			this._horizontalAlignment = v;
+		});
+	}
+	set indentLevel(v: number) {
+		this._ctx.queueAction(() => {
+			if (!this._data.paragraphFormat) this._data.paragraphFormat = {};
+			this._data.paragraphFormat.indentLevel = v;
+			this._indentLevel = v;
+		});
+	}
+
+	_populate(props: string[]) {
+		const pf = this._data.paragraphFormat;
+		this._horizontalAlignment = pf?.horizontalAlignment ?? "Left";
+		this._indentLevel = pf?.indentLevel ?? 0;
+		this.bulletFormat._populate();
 	}
 }
 

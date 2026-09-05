@@ -415,6 +415,78 @@ describe("powerpoint_update_shape_properties", () => {
 		expect(result.updated).toContain("fontSize");
 		expect(result.updated).toContain("bold");
 	});
+
+	it("updates font decoration properties", async () => {
+		const result = (await processCommand(
+			"cmd-19b",
+			"powerpoint_update_shape_properties",
+			{
+				slideIndex: 0,
+				shapeId: "s1",
+				underline: "Single",
+				strikethrough: true,
+				allCaps: true,
+			},
+		)) as any;
+
+		expect(result.updated).toContain("underline");
+		expect(result.updated).toContain("strikethrough");
+		expect(result.updated).toContain("allCaps");
+	});
+
+	it("updates paragraph and bullet properties", async () => {
+		const result = (await processCommand(
+			"cmd-19c",
+			"powerpoint_update_shape_properties",
+			{
+				slideIndex: 0,
+				shapeId: "s1",
+				bulletType: "Numbered",
+				bulletVisible: true,
+				horizontalAlignment: "Center",
+				indentLevel: 2,
+			},
+		)) as any;
+
+		expect(result.updated).toContain("bulletType");
+		expect(result.updated).toContain("bulletVisible");
+		expect(result.updated).toContain("horizontalAlignment");
+		expect(result.updated).toContain("indentLevel");
+	});
+
+	it("updates text frame properties", async () => {
+		const result = (await processCommand(
+			"cmd-19d",
+			"powerpoint_update_shape_properties",
+			{
+				slideIndex: 0,
+				shapeId: "s1",
+				textMarginTop: 10,
+				wordWrap: false,
+				verticalAlignment: "Middle",
+			},
+		)) as any;
+
+		expect(result.updated).toContain("textMarginTop");
+		expect(result.updated).toContain("wordWrap");
+		expect(result.updated).toContain("verticalAlignment");
+	});
+
+	it("does not update paragraph/font-decoration properties when shape has no text frame", async () => {
+		const result = (await processCommand(
+			"cmd-19e",
+			"powerpoint_update_shape_properties",
+			{
+				slideIndex: 0,
+				shapeId: "s3",
+				bulletType: "Numbered",
+				underline: "Single",
+			},
+		)) as any;
+
+		expect(result.updated).not.toContain("bulletType");
+		expect(result.updated).not.toContain("underline");
+	});
 });
 
 describe("powerpoint_update_speaker_notes", () => {
