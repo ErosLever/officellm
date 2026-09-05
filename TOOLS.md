@@ -18,8 +18,8 @@ All 131 MCP tools exposed by this project, grouped by host application and categ
 ### Read
 | Tool | Description |
 |---|---|
-| `powerpoint_get_deck_outline` | Full slide deck outline with shapes per slide |
-| `powerpoint_get_slide` | All shapes on a slide with position, size, text, styling |
+| `powerpoint_get_deck_outline` | Slide deck outline with shapes per slide; optional `startSlide`/`endSlide` to scope to a range instead of the whole deck |
+| `powerpoint_get_slide` | All shapes on a slide with position, size, text, styling, and applied layout |
 | `powerpoint_get_slide_image` | Renders a slide as a PNG (base64) |
 | `powerpoint_get_shape_image` | Renders a single shape as a PNG (base64) |
 | `powerpoint_get_table` | Reads all cell text from a table shape |
@@ -30,7 +30,7 @@ All 131 MCP tools exposed by this project, grouped by host application and categ
 | Tool | Description |
 |---|---|
 | `powerpoint_update_shape_text` | Updates a shape's text content |
-| `powerpoint_update_shape_properties` | Updates position, size, rotation, font of a shape |
+| `powerpoint_update_shape_properties` | Updates position, size, rotation, font, paragraph/bullet, and text frame properties of a shape |
 | `powerpoint_update_speaker_notes` | Replaces speaker notes for a slide |
 
 ### Shape CRUD

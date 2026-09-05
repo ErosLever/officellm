@@ -269,6 +269,8 @@ When working with the Word JavaScript API in the add-in:
 | `excel_set_page_layout`              | Excel      | Write           |
 | `excel_get_page_layout`              | Excel      | Read            |
 
+`powerpoint_update_shape_properties` also supports font decoration (underline/strikethrough/allCaps/smallCaps/subscript/superscript), paragraph/bullet formatting (horizontalAlignment/indentLevel/bulletType/bulletStyle/bulletVisible), and text frame layout (margins/autoSizeSetting/wordWrap/verticalAlignment). `indentLevel`, `bulletType`, and `bulletStyle` require Office JS API set 1.10, which is Windows-only — they no-op on Mac/web.
+
 **Mutation modes by host**:
 
 - **Word**: Tracked changes (`changeTrackingMode: "TrackMineOnly"`) — user accepts/rejects via Word Review ribbon or tracked change tools. No confirmation gate needed.
