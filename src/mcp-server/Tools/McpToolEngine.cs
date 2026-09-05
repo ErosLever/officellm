@@ -118,7 +118,7 @@ public static class McpToolEngine
         new
         {
             name = "powerpoint_get_deck_outline",
-            description = "Returns the full slide deck outline. Each slide lists its shapes with type, position, size, and text content. Use office_get_active_apps first to find the right instanceId.",
+            description = "Returns the slide deck outline. Each slide lists its shapes with type, position, size, and text content. Defaults to the full deck — pass startSlide/endSlide to scope to a subset and avoid dumping every slide. Use office_get_active_apps first to find the right instanceId.",
             inputSchema = new
             {
                 type = "object",
@@ -126,7 +126,9 @@ public static class McpToolEngine
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps (e.g. 'powerpoint_1')." },
                     ["includeSpeakerNotes"] = new { type = "boolean", description = "Include speaker notes in the outline", @default = false },
-                    ["includeHiddenSlides"] = new { type = "boolean", description = "Include hidden slides in the outline", @default = false }
+                    ["includeHiddenSlides"] = new { type = "boolean", description = "Include hidden slides in the outline", @default = false },
+                    ["startSlide"] = new { type = "integer", description = "Zero-based index of the first slide to include. Default: 0 (start of deck)." },
+                    ["endSlide"] = new { type = "integer", description = "Zero-based index of the last slide to include (inclusive). Default: last slide in the deck." }
                 },
                 required = new[] { "instanceId" }
             }

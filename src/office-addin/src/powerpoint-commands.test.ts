@@ -168,6 +168,40 @@ describe("powerpoint_get_deck_outline", () => {
 		)) as any;
 		expect(result.slides[2].title).toBe("Slide 3");
 	});
+
+	it("scopes to a startSlide/endSlide range without touching other slides", async () => {
+		const result = (await processCommand(
+			"cmd-3b",
+			"powerpoint_get_deck_outline",
+			{ startSlide: 1, endSlide: 1 },
+		)) as any;
+
+		expect(result.totalSlides).toBe(3);
+		expect(result.slides).toHaveLength(1);
+		expect(result.slides[0].index).toBe(1);
+		expect(result.slides[0].title).toBe("Pricing Table");
+	});
+
+	it("clamps an out-of-range endSlide to the last slide", async () => {
+		const result = (await processCommand(
+			"cmd-3c",
+			"powerpoint_get_deck_outline",
+			{ startSlide: 2, endSlide: 99 },
+		)) as any;
+
+		expect(result.slides).toHaveLength(1);
+		expect(result.slides[0].index).toBe(2);
+	});
+
+	it("errors when startSlide is after endSlide", async () => {
+		const result = (await processCommand(
+			"cmd-3d",
+			"powerpoint_get_deck_outline",
+			{ startSlide: 2, endSlide: 0 },
+		)) as any;
+
+		expect(result.error).toBeDefined();
+	});
 });
 
 describe("powerpoint_get_slide", () => {

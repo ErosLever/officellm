@@ -207,7 +207,9 @@ function safeNum(val: any, fallback = 0): number {
 
 // ── Read tools ──────────────────────────────────────────────────
 
-async function handleGetDeckOutline(_args: unknown): Promise<unknown> {
+async function handleGetDeckOutline(args: unknown): Promise<unknown> {
+	const config = args as { startSlide?: number; endSlide?: number };
+
 	return runInPowerPoint(async (ctx) => {
 		const pres = ctx.presentation;
 		pres.load("slides");
@@ -215,15 +217,23 @@ async function handleGetDeckOutline(_args: unknown): Promise<unknown> {
 
 		const totalSlides = pres.slides.items.length;
 
+		const from = Math.max(0, config.startSlide ?? 0);
+		const to = Math.min(totalSlides - 1, config.endSlide ?? totalSlides - 1);
+		if (from > to) {
+			return { error: `Invalid slide range: startSlide (${from}) is after endSlide (${to}).` };
+		}
+		const indices: number[] = [];
+		for (let i = from; i <= to; i++) indices.push(i);
+
 		// Load shape items
-		for (const sl of pres.slides.items) {
-			sl.load("shapes/items/$none");
+		for (const i of indices) {
+			pres.slides.items[i].load("shapes/items/$none");
 		}
 		await ctx.sync();
 
 		// Load direct shape properties: id, name, type, left, top, width, height
-		for (const sl of pres.slides.items) {
-			for (const s of sl.shapes.items) {
+		for (const i of indices) {
+			for (const s of pres.slides.items[i].shapes.items) {
 				s.load("id,name,type,left,top,width,height");
 			}
 		}
@@ -231,7 +241,7 @@ async function handleGetDeckOutline(_args: unknown): Promise<unknown> {
 
 		// Build slide list
 		const slideList = [];
-		for (let i = 0; i < totalSlides; i++) {
+		for (const i of indices) {
 			const shapes = pres.slides.items[i].shapes.items;
 
 			// Load text for title detection
