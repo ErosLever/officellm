@@ -136,7 +136,7 @@ public static class McpToolEngine
         new
         {
             name = "powerpoint_get_slide",
-            description = "Returns all shapes on a single slide with full properties: type, position (left/top), size (width/height), rotation, text content, font styling (name/size/bold/italic/color), paragraph alignment, and fill color. Use powerpoint_get_deck_outline first to see slide indices.",
+            description = "Returns all shapes on a single slide with full properties: type, position (left/top), size (width/height), rotation, text content, font styling (name/size/bold/italic/color), paragraph alignment, and fill color. Also returns the slide's currently applied layout (id/name). Use powerpoint_get_deck_outline first to see slide indices.",
             inputSchema = new
             {
                 type = "object",

@@ -439,6 +439,53 @@ class MockSlideMasterCollection {
 	}
 }
 
+// ── Mock Applied Slide Layout (slide.layout) ────────────────────
+
+class MockAppliedLayout {
+	private _ctx: MockContext;
+	private _slideData: MockSlideData;
+	private _loaded = new Set<string>();
+	private _id = "";
+	private _name = "";
+
+	constructor(ctx: MockContext, slideData: MockSlideData) {
+		this._ctx = ctx;
+		this._slideData = slideData;
+	}
+
+	get id() {
+		return this._id;
+	}
+	get name() {
+		return this._name;
+	}
+
+	load(props: string | string[]) {
+		const propList = Array.isArray(props)
+			? props
+			: props.split(",").map((p) => p.trim());
+		for (const p of propList) this._loaded.add(p);
+		this._ctx.queueLoad(this, propList);
+	}
+
+	_populate(props: string[]) {
+		const l = this._loaded;
+		const layoutId = this._slideData.layoutId ?? "";
+		const masters = (this._ctx.presentation.slideMasters as any)
+			._data as MockSlideMasterData[];
+		let name = "";
+		for (const master of masters) {
+			const found = master.layouts.find((ly) => ly.id === layoutId);
+			if (found) {
+				name = found.name;
+				break;
+			}
+		}
+		if (l.has("id") || props.includes("id")) this._id = layoutId;
+		if (l.has("name") || props.includes("name")) this._name = name;
+	}
+}
+
 // ── Mock Slide Collection ───────────────────────────────────────
 
 class MockSlideCollection {
@@ -480,6 +527,7 @@ class MockSlide {
 	private _index: number;
 	private _idBacking: string = "";
 	shapes: MockShapeCollection;
+	layout: MockAppliedLayout;
 
 	constructor(ctx: MockContext, data: MockSlideData, index: number) {
 		this._ctx = ctx;
@@ -487,6 +535,7 @@ class MockSlide {
 		this._index = index;
 		this._idBacking = data.id ?? `slide_${index}`;
 		this.shapes = new MockShapeCollection(ctx, data.shapes, this);
+		this.layout = new MockAppliedLayout(ctx, data);
 	}
 
 	get id() {
@@ -530,10 +579,6 @@ class MockSlide {
 		this._ctx.queueAction(() => {
 			this._data.layoutId = (layout as any)._data.id;
 		});
-	}
-
-	get layout() {
-		return { id: this._data.layoutId ?? "" };
 	}
 
 	getNotesSlide() {

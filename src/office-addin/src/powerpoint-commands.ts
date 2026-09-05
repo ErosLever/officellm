@@ -308,8 +308,9 @@ async function handleGetSlide(args: unknown): Promise<unknown> {
 
 		const slide = pres.slides.items[slideIndex];
 
-		// Step 1: Load shape items
+		// Step 1: Load shape items + applied layout
 		slide.load("shapes/items/$none");
+		slide.layout.load("id,name");
 		await ctx.sync();
 
 		// Step 2: Load direct properties
@@ -385,6 +386,7 @@ async function handleGetSlide(args: unknown): Promise<unknown> {
 			slideIndex,
 			title: slideTitle || `Slide ${slideIndex + 1}`,
 			shapes: shapeList,
+			layout: { id: safeStr(slide.layout.id), name: safeStr(slide.layout.name) },
 		};
 	});
 }

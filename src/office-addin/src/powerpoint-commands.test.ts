@@ -225,6 +225,27 @@ describe("powerpoint_get_slide", () => {
 		expect(title.text).toBe("Quarterly Results");
 	});
 
+	it("reports an empty layout when no layout has been applied", async () => {
+		const result = (await processCommand("cmd-4b", "powerpoint_get_slide", {
+			slideIndex: 0,
+		})) as any;
+
+		expect(result.layout).toEqual({ id: "", name: "" });
+	});
+
+	it("reflects the layout applied via powerpoint_set_slide_layout", async () => {
+		await processCommand("cmd-4c", "powerpoint_set_slide_layout", {
+			slideIndex: 0,
+			layoutId: "layout_1",
+		});
+
+		const result = (await processCommand("cmd-4d", "powerpoint_get_slide", {
+			slideIndex: 0,
+		})) as any;
+
+		expect(result.layout).toEqual({ id: "layout_1", name: "Title and Content" });
+	});
+
 	it("includes font properties for text shapes", async () => {
 		const result = (await processCommand("cmd-5", "powerpoint_get_slide", {
 			slideIndex: 0,
