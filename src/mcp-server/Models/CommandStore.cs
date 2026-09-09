@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace OfficeMcpServer.Models;
 
 /// <summary>
@@ -21,7 +23,11 @@ public class PendingCommand
     /// <summary>
     /// TaskCompletionSource for real-time result notification (SignalR).
     /// Resolved immediately when CompleteCommand is called, replacing the old polling loop.
+    /// Not serialized — its .Task/.Result throws synchronously once canceled (e.g. on
+    /// WaitForResult timeout), which would crash JSON serialization of any endpoint
+    /// (like GET /instances/{id}/commands) that returns a PendingCommand.
     /// </summary>
+    [JsonIgnore]
     public TaskCompletionSource<PendingCommand>? CompletionSource { get; set; }
 }
 
