@@ -83,6 +83,9 @@ All 131 MCP tools exposed by this project, grouped by host application and categ
 | `powerpoint_group_shapes` | Groups multiple shapes into one |
 | `powerpoint_ungroup_shape` | Ungroups a grouped shape |
 
+### Comments
+PowerPoint has no comment tools. Unlike Word (`Word.Comment`/`CommentCollection`/`CommentReply`) and Excel (`Excel.Comment`/`CommentCollection`/`CommentReply`), Office.js does not expose a Comment API for PowerPoint — `PowerPoint.Slide` and `PowerPoint.Shape` have no `comments` property in the current type definitions (`@types/office-js` 1.0.591). This is a platform gap, not an oversight; revisit if Microsoft ships a PowerPoint Comment API.
+
 ## Word
 
 ### Read

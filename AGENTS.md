@@ -271,6 +271,8 @@ When working with the Word JavaScript API in the add-in:
 
 `powerpoint_update_shape_properties` also supports font decoration (underline/strikethrough/allCaps/smallCaps/subscript/superscript), paragraph/bullet formatting (horizontalAlignment/indentLevel/bulletType/bulletStyle/bulletVisible), and text frame layout (margins/autoSizeSetting/wordWrap/verticalAlignment). `indentLevel`, `bulletType`, and `bulletStyle` require Office JS API set 1.10, which is Windows-only — they no-op on Mac/web.
 
+**No PowerPoint comment tools**: Office.js has no Comment API for PowerPoint (`PowerPoint.Slide`/`Shape` expose no `comments` property, unlike `Word.Comment`/`CommentCollection` and `Excel.Comment`/`CommentCollection`). This is a platform limitation, not a missing feature in this repo — do not attempt to add `powerpoint_get_comments`/`add_comment`/etc. until Microsoft ships the underlying API.
+
 **Mutation modes by host**:
 
 - **Word**: Tracked changes (`changeTrackingMode: "TrackMineOnly"`) — user accepts/rejects via Word Review ribbon or tracked change tools. No confirmation gate needed.
