@@ -756,6 +756,220 @@ describe("powerpoint_update_text_range_properties", () => {
 	});
 });
 
+describe("powerpoint_insert_paragraph", () => {
+	it("inserts at the start, shifting every existing paragraph down by one", async () => {
+		const result = (await processCommand("cmd-ip1", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "Zero",
+			position: "start",
+		})) as any;
+
+		expect(result.start).toBe(0);
+		expect(result.length).toBe(4);
+		expect(result.updated).toEqual([]);
+
+		const after = (await processCommand(
+			"cmd-ip1-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
+			"Zero",
+			"Alpha",
+			"Beta",
+			"Gamma",
+			"Delta",
+			"Epsilon",
+		]);
+	});
+
+	it("inserts at the end, appending a new last paragraph", async () => {
+		const result = (await processCommand("cmd-ip2", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "Zeta",
+			position: "end",
+		})) as any;
+
+		const after = (await processCommand(
+			"cmd-ip2-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
+			"Alpha",
+			"Beta",
+			"Gamma",
+			"Delta",
+			"Epsilon",
+			"Zeta",
+		]);
+		expect(after.paragraphs[5].start).toBe(result.start);
+		expect(after.paragraphs[5].length).toBe(result.length);
+	});
+
+	it("inserts before/after a reference paragraph without disturbing its neighbors", async () => {
+		const before = (await processCommand(
+			"cmd-ip3-setup",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		const gamma = before.paragraphs[2]; // "Gamma"
+
+		await processCommand("cmd-ip3", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "Middle",
+			position: "before",
+			refParagraphStart: gamma.start,
+			refParagraphLength: gamma.length,
+			refParagraphText: gamma.text,
+		});
+
+		const after = (await processCommand(
+			"cmd-ip3-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
+			"Alpha",
+			"Beta",
+			"Middle",
+			"Gamma",
+			"Delta",
+			"Epsilon",
+		]);
+		// Neighboring paragraphs' formatting is untouched — "Beta" (index 1)
+		// still shares its group with "Delta" wasn't moved, and "Gamma"
+		// (now index 3) still carries the default formatting it had before.
+		expect(after.paragraphs[3].groupId).toBe(after.paragraphs[0].groupId);
+	});
+
+	it("applies inline formatting to the newly inserted paragraph only", async () => {
+		const result = (await processCommand("cmd-ip4", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "Styled",
+			position: "end",
+			indentLevel: 3,
+			color: "#00FF00",
+		})) as any;
+
+		expect(result.updated).toContain("indentLevel");
+		expect(result.updated).toContain("color");
+
+		const after = (await processCommand(
+			"cmd-ip4-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		const newParagraph = after.paragraphs[after.paragraphs.length - 1];
+		expect(newParagraph.text).toBe("Styled");
+		const group = after.propertyGroups.find(
+			(g: any) => g.groupId === newParagraph.groupId,
+		);
+		expect(group.properties).toEqual({
+			font: { color: "#00FF00" },
+			paragraphFormat: { indentLevel: 3 },
+		});
+	});
+
+	it("inherits the spliced-into paragraph's formatting when no formatting params are given", async () => {
+		const before = (await processCommand(
+			"cmd-ip5-setup",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		const delta = before.paragraphs[3]; // "Delta", has a distinct font color override
+
+		const result = (await processCommand("cmd-ip5", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "AfterDelta",
+			position: "after",
+			refParagraphStart: delta.start,
+			refParagraphLength: delta.length,
+		})) as any;
+
+		expect(result.updated).toEqual([]);
+
+		const after = (await processCommand(
+			"cmd-ip5-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		const newParagraph = after.paragraphs[4];
+		expect(newParagraph.text).toBe("AfterDelta");
+		expect(newParagraph.groupId).toBe(after.paragraphs[3].groupId);
+	});
+
+	it("returns error when refParagraphStart/refParagraphLength are out of range", async () => {
+		const result = (await processCommand("cmd-ip6", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "X",
+			position: "after",
+			refParagraphStart: 0,
+			refParagraphLength: 9999,
+		})) as any;
+
+		expect(result.error).toContain("out of range");
+	});
+
+	it("returns error when refParagraphText does not match the current text at the reference range", async () => {
+		const result = (await processCommand("cmd-ip7", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "X",
+			position: "before",
+			refParagraphStart: 0,
+			refParagraphLength: 5,
+			refParagraphText: "Wrong",
+		})) as any;
+
+		expect(result.error).toContain("refParagraphText");
+	});
+
+	it("returns error for shape with no text frame", async () => {
+		const result = (await processCommand("cmd-ip8", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s3", // s3 is an Image
+			text: "X",
+			position: "end",
+		})) as any;
+
+		expect(result.error).toContain("does not support text");
+	});
+
+	it("returns error for missing shape", async () => {
+		const result = (await processCommand("cmd-ip9", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "nope",
+			text: "X",
+			position: "end",
+		})) as any;
+
+		expect(result.error).toContain("not found");
+	});
+
+	it("returns error for invalid position", async () => {
+		const result = (await processCommand("cmd-ip10", "powerpoint_insert_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "X",
+			position: "middle",
+		})) as any;
+
+		expect(result.error).toContain("Invalid position");
+	});
+});
+
 describe("powerpoint_update_speaker_notes", () => {
 	it("writes notes to a slide", async () => {
 		const result = (await processCommand(

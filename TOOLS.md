@@ -1,6 +1,6 @@
 # Tool Reference
 
-All 131 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
+All 134 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
 
 ## Shared / Cross-cutting
 
@@ -33,6 +33,7 @@ All 131 MCP tools exposed by this project, grouped by host application and categ
 | `powerpoint_update_shape_text` | Updates a shape's text content |
 | `powerpoint_update_shape_properties` | Updates position, size, rotation, font, paragraph/bullet, and text frame properties of a shape |
 | `powerpoint_update_text_range_properties` | Updates font/paragraph/bullet properties on a specific character sub-range of a shape's text (e.g. a single paragraph), guarded by an optional expectedText check |
+| `powerpoint_insert_paragraph` | Inserts a new paragraph into a shape's text frame (positioned via start/end/before/after), optionally applying font/paragraph/bullet formatting in the same call — without touching any existing paragraph |
 | `powerpoint_update_speaker_notes` | Replaces speaker notes for a slide |
 
 ### Shape CRUD

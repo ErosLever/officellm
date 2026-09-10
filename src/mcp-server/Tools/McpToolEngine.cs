@@ -347,6 +347,44 @@ public static class McpToolEngine
         },
         new
         {
+            name = "powerpoint_insert_paragraph",
+            description = "Inserts a new paragraph into a shape's text frame, optionally applying font/paragraph/bullet formatting to it in the same call. Unlike powerpoint_update_shape_text (which replaces the entire text frame), this adds one paragraph without touching any existing paragraph's text or formatting. If no formatting is given, the new paragraph inherits the formatting of whichever paragraph it's spliced next to. Position it with 'start'/'end', or relative to an existing paragraph via 'before'/'after' plus refParagraphStart/refParagraphLength — typically taken directly from a paragraph object returned by powerpoint_get_shape_paragraphs.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["shapeId"] = new { type = "string", description = "Shape ID or name" },
+                    ["text"] = new { type = "string", description = "REQUIRED. Plain text of the new paragraph (no '\\r')." },
+                    ["position"] = new { type = "string", description = "REQUIRED. 'start' (before every paragraph), 'end' (after every paragraph), 'before'/'after' (relative to a reference paragraph identified by refParagraphStart/refParagraphLength)." },
+                    ["refParagraphStart"] = new { type = "integer", description = "REQUIRED for position 'before'/'after'. The 'start' of the reference paragraph, as returned by powerpoint_get_shape_paragraphs." },
+                    ["refParagraphLength"] = new { type = "integer", description = "REQUIRED for position 'before'/'after'. The 'length' of the reference paragraph, as returned by powerpoint_get_shape_paragraphs." },
+                    ["refParagraphText"] = new { type = "string", description = "Optional. The reference paragraph's 'text', as returned by powerpoint_get_shape_paragraphs — checked before mutating as a staleness guard; if it doesn't match, the call is rejected rather than inserting at the wrong place." },
+                    ["fontName"] = new { type = "string", description = "Font family name (e.g. 'Arial')" },
+                    ["fontSize"] = new { type = "number", description = "Font size in points" },
+                    ["bold"] = new { type = "boolean", description = "Bold on/off" },
+                    ["italic"] = new { type = "boolean", description = "Italic on/off" },
+                    ["color"] = new { type = "string", description = "Font color as HTML hex (e.g. '#FF0000')" },
+                    ["underline"] = new { type = "string", description = "Underline style, e.g. 'Single', 'None'." },
+                    ["strikethrough"] = new { type = "boolean", description = "Single strikethrough on/off." },
+                    ["doubleStrikethrough"] = new { type = "boolean", description = "Double strikethrough on/off." },
+                    ["allCaps"] = new { type = "boolean", description = "All-caps text on/off." },
+                    ["smallCaps"] = new { type = "boolean", description = "Small-caps text on/off." },
+                    ["subscript"] = new { type = "boolean", description = "Subscript on/off." },
+                    ["superscript"] = new { type = "boolean", description = "Superscript on/off." },
+                    ["horizontalAlignment"] = new { type = "string", description = "Paragraph horizontal alignment: 'Left', 'Center', 'Right', 'Justify', 'JustifyLow', 'Distributed', 'ThaiDistributed'." },
+                    ["indentLevel"] = new { type = "number", description = "Paragraph indent level. Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
+                    ["bulletType"] = new { type = "string", description = "Bullet type: 'None', 'Numbered', 'Unnumbered'. Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
+                    ["bulletStyle"] = new { type = "string", description = "Bullet style, e.g. 'ArabicNumeralPeriod', 'RomanUppercasePeriod' (see Office JS PowerPoint.BulletStyle enum for the full list). Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
+                    ["bulletVisible"] = new { type = "boolean", description = "Whether the bullet/number is shown for the paragraph." }
+                },
+                required = new[] { "instanceId", "slideIndex", "shapeId", "text", "position" }
+            }
+        },
+        new
+        {
             name = "powerpoint_update_speaker_notes",
             description = "Sets speaker notes for a specific slide. Replaces any existing notes. Applies directly.",
             inputSchema = new
@@ -1029,6 +1067,7 @@ public static class McpToolEngine
         "powerpoint_update_shape_text",
         "powerpoint_update_shape_properties",
         "powerpoint_update_text_range_properties",
+        "powerpoint_insert_paragraph",
         "powerpoint_update_speaker_notes",
         "powerpoint_add_textbox",
         "powerpoint_add_image",
@@ -1263,6 +1302,19 @@ public static class McpToolEngine
         {
             var unknownParamError = ValidateKnownParameters(args.Value, name,
                 "instanceId", "slideIndex", "shapeId", "start", "length", "expectedText",
+                "fontName", "fontSize", "bold", "italic", "color",
+                "underline", "strikethrough", "doubleStrikethrough", "allCaps", "smallCaps", "subscript", "superscript",
+                "horizontalAlignment", "indentLevel",
+                "bulletType", "bulletStyle", "bulletVisible");
+            if (unknownParamError != null)
+                return unknownParamError;
+        }
+
+        if (name == "powerpoint_insert_paragraph" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "shapeId", "text", "position",
+                "refParagraphStart", "refParagraphLength", "refParagraphText",
                 "fontName", "fontSize", "bold", "italic", "color",
                 "underline", "strikethrough", "doubleStrikethrough", "allCaps", "smallCaps", "subscript", "superscript",
                 "horizontalAlignment", "indentLevel",

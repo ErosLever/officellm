@@ -133,7 +133,7 @@ When working with the Word JavaScript API in the add-in:
 - **`getTextFrameOrNullObject` equivalent** — Word has no direct equivalent. Use `range.getHtml()` or `range.getText()` to read content. For null-safe patterns, check `range.isNullObject` after `context.sync()`.
 - **Range-based operations** — Word operates on `Range` objects. Get the current selection via `context.document.getSelection()`, then manipulate it as a range.
 
-### Tool Inventory (133 tools)
+### Tool Inventory (134 tools)
 
 | Tool Name                            | Host       | Category        |
 | ------------------------------------- | ---------- | --------------- |
@@ -153,6 +153,7 @@ When working with the Word JavaScript API in the add-in:
 | `powerpoint_update_shape_text`       | PowerPoint | Write           |
 | `powerpoint_update_shape_properties` | PowerPoint | Write           |
 | `powerpoint_update_text_range_properties` | PowerPoint | Write     |
+| `powerpoint_insert_paragraph`        | PowerPoint | Write           |
 | `powerpoint_update_speaker_notes`    | PowerPoint | Write           |
 | `powerpoint_add_textbox`             | PowerPoint | Write           |
 | `powerpoint_add_image`               | PowerPoint | Write           |
@@ -271,7 +272,7 @@ When working with the Word JavaScript API in the add-in:
 | `excel_set_page_layout`              | Excel      | Write           |
 | `excel_get_page_layout`              | Excel      | Read            |
 
-`powerpoint_update_shape_properties` also supports font decoration (underline/strikethrough/allCaps/smallCaps/subscript/superscript), paragraph/bullet formatting (horizontalAlignment/indentLevel/bulletType/bulletStyle/bulletVisible), and text frame layout (margins/autoSizeSetting/wordWrap/verticalAlignment). `powerpoint_get_shape_paragraphs` and `powerpoint_update_text_range_properties` extend this to a single character sub-range (typically one paragraph) instead of the shape's whole text frame. `indentLevel`, `bulletType`, and `bulletStyle` require Office JS API set 1.10; confirmed working on Mac (live-tested via `powerpoint_get_shape_paragraphs`/`powerpoint_update_text_range_properties`), verify on other target platforms before relying on it there.
+`powerpoint_update_shape_properties` also supports font decoration (underline/strikethrough/allCaps/smallCaps/subscript/superscript), paragraph/bullet formatting (horizontalAlignment/indentLevel/bulletType/bulletStyle/bulletVisible), and text frame layout (margins/autoSizeSetting/wordWrap/verticalAlignment). `powerpoint_get_shape_paragraphs` and `powerpoint_update_text_range_properties` extend this to a single character sub-range (typically one paragraph) instead of the shape's whole text frame. `powerpoint_insert_paragraph` adds a brand-new paragraph (positioned via `start`/`end`/`before`/`after`) without touching any existing paragraph's text or formatting, optionally applying the same font/paragraph/bullet formatting params in the same call — if none are given, the new paragraph inherits the formatting of whichever paragraph it's spliced next to. `indentLevel`, `bulletType`, and `bulletStyle` require Office JS API set 1.10; confirmed working on Mac (live-tested via `powerpoint_get_shape_paragraphs`/`powerpoint_update_text_range_properties`), verify on other target platforms before relying on it there.
 
 **No PowerPoint comment tools**: Office.js has no Comment API for PowerPoint (`PowerPoint.Slide`/`Shape` expose no `comments` property, unlike `Word.Comment`/`CommentCollection` and `Excel.Comment`/`CommentCollection`). This is a platform limitation, not a missing feature in this repo — do not attempt to add `powerpoint_get_comments`/`add_comment`/etc. until Microsoft ships the underlying API.
 

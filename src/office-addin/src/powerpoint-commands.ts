@@ -65,6 +65,9 @@ export async function processCommand(
 			case "powerpoint_update_text_range_properties":
 				result = await handleUpdateTextRangeProperties(args);
 				break;
+			case "powerpoint_insert_paragraph":
+				result = await handleInsertParagraph(args);
+				break;
 			case "powerpoint_update_speaker_notes":
 				result = await handleUpdateSpeakerNotes(args);
 				break;
@@ -334,6 +337,31 @@ function applyDefinedProperties(
 }
 
 /**
+ * True if `config` defines at least one key from any of the given setter
+ * maps — used to gate a load+sync+apply block behind "was anything actually
+ * requested" without hand-listing the same setter keys in an OR-chain.
+ */
+function hasAnyDefinedKey(
+	config: Record<string, unknown>,
+	...setterMaps: Record<string, (...args: any[]) => void>[]
+): boolean {
+	return setterMaps.some((setters) => Object.keys(setters).some((key) => config[key] !== undefined));
+}
+
+/**
+ * Applies font/paragraphFormat/bulletFormat overrides to a text range —
+ * shared by every handler that restyles a `PowerPoint.TextRange` from a flat
+ * config object (font/paragraphFormat/bulletFormat setter keys).
+ */
+function applyRangeProperties(config: Record<string, unknown>, range: PowerPoint.TextRange): string[] {
+	return [
+		...applyDefinedProperties(config, range.font, FONT_SETTERS),
+		...applyDefinedProperties(config, range.paragraphFormat, PARAGRAPH_FORMAT_SETTERS),
+		...applyDefinedProperties(config, range.paragraphFormat.bulletFormat, BULLET_FORMAT_SETTERS),
+	];
+}
+
+/**
  * Diffs `full` against `base`, keeping only the categories/keys whose values
  * differ. Used to shrink a paragraph's complete properties down to just its
  * overrides relative to the shape's defaultProperties.
@@ -360,6 +388,38 @@ function diffRangeProperties(
 		},
 		{},
 	);
+}
+
+/**
+ * Resolves a slide index + shapeId (id or name) to a live Shape object.
+ * Shared by every handler that operates on a single named/id'd shape.
+ */
+async function resolveShape(
+	ctx: PowerPoint.RequestContext,
+	slideIndex: number,
+	shapeId: string,
+): Promise<{ shape: PowerPoint.Shape } | { error: string }> {
+	const pres = ctx.presentation;
+	pres.load("slides");
+	await ctx.sync();
+
+	if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
+		return { error: `Slide index ${slideIndex} out of range` };
+	}
+
+	const slide = pres.slides.items[slideIndex];
+	slide.load("shapes/items/$none");
+	await ctx.sync();
+
+	for (const s of slide.shapes.items) {
+		s.load("id,name");
+	}
+	await ctx.sync();
+
+	const shape = slide.shapes.items.find(
+		(s: any) => safeStr(s.id) === shapeId || safeStr(s.name) === shapeId,
+	);
+	return shape ? { shape } : { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
 }
 
 // ── Read tools ──────────────────────────────────────────────────
@@ -720,29 +780,9 @@ async function handleGetShapeParagraphs(args: unknown): Promise<unknown> {
 	const shapeId = config.shapeId ?? "";
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
-		slide.load("shapes/items/$none");
-		await ctx.sync();
-
-		for (const s of slide.shapes.items) {
-			s.load("id,name");
-		}
-		await ctx.sync();
-
-		const shape = slide.shapes.items.find(
-			(s: any) => safeStr(s.id) === shapeId || safeStr(s.name) === shapeId,
-		);
-		if (!shape) {
-			return { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
-		}
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return resolved;
+		const { shape } = resolved;
 
 		const tf = shape.getTextFrameOrNullObject();
 		ctx.load(tf, "isNullObject,textRange/text");
@@ -938,30 +978,9 @@ async function handleUpdateShapeText(args: unknown): Promise<unknown> {
 	const { slideIndex = 0, shapeId = "", text = "" } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
-		slide.load("shapes/items/$none");
-		await ctx.sync();
-
-		for (const s of slide.shapes.items) {
-			s.load("id,name");
-		}
-		await ctx.sync();
-
-		// Find shape
-		const shape = slide.shapes.items.find(
-			(s: any) => safeStr(s.id) === shapeId || safeStr(s.name) === shapeId,
-		);
-		if (!shape) {
-			return { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
-		}
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return resolved;
+		const { shape } = resolved;
 
 		// Get text frame — check if it's a text-bearing shape
 		const tf = shape.getTextFrameOrNullObject();
@@ -1019,29 +1038,9 @@ async function handleUpdateShapeProperties(args: unknown): Promise<unknown> {
 	const { slideIndex = 0, shapeId = "" } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
-		slide.load("shapes/items/$none");
-		await ctx.sync();
-
-		for (const s of slide.shapes.items) {
-			s.load("id,name");
-		}
-		await ctx.sync();
-
-		const shape = slide.shapes.items.find(
-			(s: any) => safeStr(s.id) === shapeId || safeStr(s.name) === shapeId,
-		);
-		if (!shape) {
-			return { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
-		}
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return resolved;
+		const { shape } = resolved;
 
 		const updated: string[] = [];
 
@@ -1069,23 +1068,7 @@ async function handleUpdateShapeProperties(args: unknown): Promise<unknown> {
 
 		// Font, paragraph/bullet, and text frame properties
 		if (
-			config.fontName !== undefined ||
-			config.fontSize !== undefined ||
-			config.bold !== undefined ||
-			config.italic !== undefined ||
-			config.color !== undefined ||
-			config.underline !== undefined ||
-			config.strikethrough !== undefined ||
-			config.doubleStrikethrough !== undefined ||
-			config.allCaps !== undefined ||
-			config.smallCaps !== undefined ||
-			config.subscript !== undefined ||
-			config.superscript !== undefined ||
-			config.horizontalAlignment !== undefined ||
-			config.indentLevel !== undefined ||
-			config.bulletType !== undefined ||
-			config.bulletStyle !== undefined ||
-			config.bulletVisible !== undefined ||
+			hasAnyDefinedKey(config, FONT_SETTERS, PARAGRAPH_FORMAT_SETTERS, BULLET_FORMAT_SETTERS) ||
 			config.textMarginTop !== undefined ||
 			config.textMarginBottom !== undefined ||
 			config.textMarginLeft !== undefined ||
@@ -1222,29 +1205,9 @@ async function handleUpdateTextRangeProperties(args: unknown): Promise<unknown> 
 	const { slideIndex = 0, shapeId = "", start = 0, length = 0 } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
-		slide.load("shapes/items/$none");
-		await ctx.sync();
-
-		for (const s of slide.shapes.items) {
-			s.load("id,name");
-		}
-		await ctx.sync();
-
-		const shape = slide.shapes.items.find(
-			(s: any) => safeStr(s.id) === shapeId || safeStr(s.name) === shapeId,
-		);
-		if (!shape) {
-			return { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
-		}
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return resolved;
+		const { shape } = resolved;
 
 		const tf = shape.getTextFrameOrNullObject();
 		ctx.load(tf, "isNullObject,textRange/text");
@@ -1272,15 +1235,114 @@ async function handleUpdateTextRangeProperties(args: unknown): Promise<unknown> 
 			};
 		}
 
-		const updated = [
-			...applyDefinedProperties(config, range.font, FONT_SETTERS),
-			...applyDefinedProperties(config, range.paragraphFormat, PARAGRAPH_FORMAT_SETTERS),
-			...applyDefinedProperties(config, range.paragraphFormat.bulletFormat, BULLET_FORMAT_SETTERS),
-		];
+		const updated = applyRangeProperties(config, range);
 
 		await ctx.sync();
 
 		return { slideIndex, shapeId, start, length, updated };
+	});
+}
+
+async function handleInsertParagraph(args: unknown): Promise<unknown> {
+	const config = args as {
+		slideIndex?: number;
+		shapeId?: string;
+		text?: string;
+		position?: string;
+		refParagraphStart?: number;
+		refParagraphLength?: number;
+		refParagraphText?: string;
+		[key: string]: unknown;
+	};
+	const {
+		slideIndex = 0,
+		shapeId = "",
+		text = "",
+		position = "end",
+		refParagraphStart = 0,
+		refParagraphLength = 0,
+	} = config;
+
+	return runInPowerPoint(async (ctx) => {
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return resolved;
+		const { shape } = resolved;
+
+		const tf = shape.getTextFrameOrNullObject();
+		ctx.load(tf, "isNullObject,textRange/text");
+		await ctx.sync();
+
+		if (tf.isNullObject) {
+			return {
+				error: `Shape '${shapeId}' does not support text (type: image/table/etc)`,
+			};
+		}
+
+		const fullText = safeStr(tf.textRange.text);
+
+		if (position === "before" || position === "after") {
+			if (refParagraphStart < 0 || refParagraphStart + refParagraphLength > fullText.length) {
+				return {
+					error: `refParagraphStart/refParagraphLength out of range for shape text (length ${fullText.length})`,
+				};
+			}
+		} else if (position !== "start" && position !== "end") {
+			return { error: `Invalid position '${position}' — expected start|end|before|after` };
+		}
+
+		if (config.refParagraphText !== undefined && (position === "before" || position === "after")) {
+			const refRange = tf.textRange.getSubstring(refParagraphStart, refParagraphLength);
+			ctx.load(refRange, "text");
+			await ctx.sync();
+
+			if (safeStr(refRange.text) !== config.refParagraphText) {
+				return {
+					error:
+						"Text at [refParagraphStart,refParagraphLength) does not match refParagraphText — shape text may have changed since it was last read.",
+				};
+			}
+		}
+
+		// The separator's placement relative to `text` — not the numeric
+		// value of `insertAt` — is what determines the splice: "before"/"start"
+		// always land right before an existing paragraph (so the new text is
+		// followed by "\r"), "after"/"end" always land right after one (so the
+		// new text is preceded by "\r"). An empty shape has neither.
+		let insertAt: number;
+		let insertText: string;
+		if (position === "start") {
+			insertAt = 0;
+			insertText = fullText.length === 0 ? text : text + "\r";
+		} else if (position === "end") {
+			insertAt = fullText.length;
+			insertText = fullText.length === 0 ? text : "\r" + text;
+		} else if (position === "before") {
+			insertAt = refParagraphStart;
+			insertText = text + "\r";
+		} else {
+			insertAt = refParagraphStart + refParagraphLength;
+			insertText = "\r" + text;
+		}
+
+		const insertionPoint = tf.textRange.getSubstring(insertAt, 0);
+		insertionPoint.text = insertText;
+		await ctx.sync();
+
+		const newStart = insertText.startsWith("\r") ? insertAt + 1 : insertAt;
+		const newLength = text.length;
+
+		let updated: string[] = [];
+		if (hasAnyDefinedKey(config, FONT_SETTERS, PARAGRAPH_FORMAT_SETTERS, BULLET_FORMAT_SETTERS)) {
+			const range = tf.textRange.getSubstring(newStart, newLength);
+			ctx.load(range, TEXT_RANGE_PROP_PATH);
+			await ctx.sync();
+
+			updated = applyRangeProperties(config, range);
+
+			await ctx.sync();
+		}
+
+		return { slideIndex, shapeId, start: newStart, length: newLength, updated };
 	});
 }
 

@@ -810,24 +810,15 @@ class MockShape {
 
 	getTextFrameOrNullObject(): MockTextFrame {
 		const hasText = this._data.text !== undefined;
-		// getTextFrameOrNullObject() creates a new backing-data object each
-		// call (per this file's header comment), but `paragraphs` must be
-		// the SAME array across calls for setter mutations made via one
-		// call's getSubstring() to be visible to a later call's getter —
-		// so vivify it on the persistent MockShapeData (this._data), not on
-		// the fresh copy below, before handing out a reference to it.
+		if (this._data.text === undefined) this._data.text = "";
+		// getTextFrameOrNullObject() returns a new MockTextFrame wrapper each
+		// call (per this file's header comment), but it must hand that wrapper
+		// the SAME backing data object every time — this._data itself — so
+		// that a `.text` splice or a `paragraphs` override made via one call's
+		// getSubstring() is visible to every other call's getter, including
+		// the persistent MockShapeData that fixtures and later assertions read.
 		this._data.paragraphs ??= [];
-		return new MockTextFrame(
-			this._ctx,
-			{
-				text: this._data.text ?? "",
-				font: this._data.font,
-				paragraphFormat: this._data.paragraphFormat,
-				textFrame: this._data.textFrame,
-				paragraphs: this._data.paragraphs,
-			},
-			hasText,
-		);
+		return new MockTextFrame(this._ctx, this._data as TextFrameBackingData, hasText);
 	}
 
 	getTable(): MockTable {
@@ -986,25 +977,76 @@ class MockTextFrame {
 class MockTextRange {
 	private _ctx: MockContext;
 	private _data: TextFrameBackingData;
-	private _text: string;
+	private _start: number | null;
+	private _length: number;
 	font: MockFont;
 	paragraphFormat: MockParagraphFormat;
 
-	constructor(ctx: MockContext, data: TextFrameBackingData) {
+	/**
+	 * `data` backs `.text` — always the shape's live, shared backing object,
+	 * so a sub-range's text mutations splice into the same text every other
+	 * range sees. `styleData` backs `.font`/`.paragraphFormat` — the shape's
+	 * flat data for the whole-range case, or a paragraph-specific override
+	 * bag (see getSubstring) for a sub-range. `start`/`length` are null/0 for
+	 * the whole range, meaning "always the current full text" rather than a
+	 * fixed snapshot.
+	 */
+	constructor(
+		ctx: MockContext,
+		data: TextFrameBackingData,
+		styleData: TextFrameBackingData = data,
+		start: number | null = null,
+		length = 0,
+	) {
 		this._ctx = ctx;
 		this._data = data;
-		this._text = data.text;
-		this.font = new MockFont(ctx, data);
-		this.paragraphFormat = new MockParagraphFormat(ctx, data);
+		this._start = start;
+		this._length = length;
+		this.font = new MockFont(ctx, styleData);
+		this.paragraphFormat = new MockParagraphFormat(ctx, styleData);
 	}
 
 	get text() {
-		return this._text;
+		if (this._start === null) return this._data.text;
+		return this._data.text.substring(this._start, this._start + this._length);
 	}
 	set text(v: string) {
 		const data = this._data;
+		if (this._start === null) {
+			this._ctx.queueAction(() => {
+				data.text = v;
+			});
+			return;
+		}
+		const start = this._start;
+		const length = this._length;
 		this._ctx.queueAction(() => {
-			data.text = v;
+			const index = data.text.slice(0, start).split("\r").length - 1;
+			// A boundary-aligned splice either lands at the START of paragraph
+			// `index` (shift it and everything after forward) or at its END
+			// (leave it alone, insert new slots right after it).
+			const atParagraphStart = start === 0 || data.text[start - 1] === "\r";
+			const insertPos = atParagraphStart ? index : index + 1;
+
+			data.text = data.text.slice(0, start) + v + data.text.slice(start + length);
+			this._length = v.length;
+
+			// Shift paragraph-override slots so they stay aligned with the
+			// paragraphs they describe now that new ones were spliced in. Each
+			// new slot starts as a copy of the paragraph being spliced into
+			// (matching PowerPoint's real splice behavior: new text inherits
+			// the formatting of whichever paragraph/run it's spliced into) —
+			// never a blank override, or the new paragraph would revert to
+			// shape-level defaults regardless of its neighbor's formatting.
+			const newParagraphCount = v.split("\r").length - 1;
+			if (newParagraphCount > 0 && data.paragraphs) {
+				const inherited = data.paragraphs[index] ?? {};
+				const clone = () => ({
+					font: inherited.font ? { ...inherited.font } : undefined,
+					paragraphFormat: inherited.paragraphFormat ? { ...inherited.paragraphFormat } : undefined,
+				});
+				data.paragraphs.splice(insertPos, 0, ...Array.from({ length: newParagraphCount }, clone));
+			}
 		});
 	}
 
@@ -1040,11 +1082,12 @@ class MockTextRange {
 			...paragraphData.paragraphFormat,
 		};
 
-		return new MockTextRange(this._ctx, {
-			text: this._data.text.substring(start, start + length),
+		const styleData: TextFrameBackingData = {
+			text: "",
 			font: paragraphData.font,
 			paragraphFormat: paragraphData.paragraphFormat,
-		});
+		};
+		return new MockTextRange(this._ctx, this._data, styleData, start, length);
 	}
 }
 
