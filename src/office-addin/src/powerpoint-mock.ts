@@ -1028,24 +1028,33 @@ class MockTextRange {
 			const atParagraphStart = start === 0 || data.text[start - 1] === "\r";
 			const insertPos = atParagraphStart ? index : index + 1;
 
+			// Count paragraph delimiters in the text being replaced BEFORE
+			// mutating — this is what tells insert (0 removed) apart from
+			// delete (1+ removed, replacement text usually empty).
+			const removedParagraphCount = data.text.slice(start, start + length).split("\r").length - 1;
+			const newParagraphCount = v.split("\r").length - 1;
+
 			data.text = data.text.slice(0, start) + v + data.text.slice(start + length);
 			this._length = v.length;
 
-			// Shift paragraph-override slots so they stay aligned with the
-			// paragraphs they describe now that new ones were spliced in. Each
-			// new slot starts as a copy of the paragraph being spliced into
-			// (matching PowerPoint's real splice behavior: new text inherits
-			// the formatting of whichever paragraph/run it's spliced into) —
-			// never a blank override, or the new paragraph would revert to
-			// shape-level defaults regardless of its neighbor's formatting.
-			const newParagraphCount = v.split("\r").length - 1;
-			if (newParagraphCount > 0 && data.paragraphs) {
+			// Keep paragraph-override slots aligned with the paragraphs they
+			// describe now that the splice changed how many there are.
+			const netChange = newParagraphCount - removedParagraphCount;
+			if (netChange > 0 && data.paragraphs) {
+				// Each new slot starts as a copy of the paragraph being spliced
+				// into (matching PowerPoint's real splice behavior: new text
+				// inherits the formatting of whichever paragraph/run it's
+				// spliced into) — never a blank override, or the new paragraph
+				// would revert to shape-level defaults regardless of its
+				// neighbor's formatting.
 				const inherited = data.paragraphs[index] ?? {};
 				const clone = () => ({
 					font: inherited.font ? { ...inherited.font } : undefined,
 					paragraphFormat: inherited.paragraphFormat ? { ...inherited.paragraphFormat } : undefined,
 				});
-				data.paragraphs.splice(insertPos, 0, ...Array.from({ length: newParagraphCount }, clone));
+				data.paragraphs.splice(insertPos, 0, ...Array.from({ length: netChange }, clone));
+			} else if (netChange < 0 && data.paragraphs) {
+				data.paragraphs.splice(insertPos, -netChange);
 			}
 		});
 	}

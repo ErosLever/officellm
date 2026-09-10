@@ -970,6 +970,172 @@ describe("powerpoint_insert_paragraph", () => {
 	});
 });
 
+describe("powerpoint_delete_paragraph", () => {
+	it("deletes a middle paragraph, shifting later paragraphs up", async () => {
+		const before = (await processCommand(
+			"cmd-dp1-setup",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		const beta = before.paragraphs[1]; // "Beta", has a distinct indentLevel override
+
+		const result = (await processCommand("cmd-dp1", "powerpoint_delete_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			paragraphStart: beta.start,
+			paragraphLength: beta.length,
+			expectedText: beta.text,
+		})) as any;
+
+		expect(result.deleted).toBe(true);
+
+		const after = (await processCommand(
+			"cmd-dp1-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
+			"Alpha",
+			"Gamma",
+			"Delta",
+			"Epsilon",
+		]);
+		// "Delta" (now index 2) keeps its distinct font-color override —
+		// deleting Beta's slot must not have shifted the wrong paragraph's
+		// formatting.
+		const delta = after.paragraphs[2];
+		const group = after.propertyGroups.find((g: any) => g.groupId === delta.groupId);
+		expect(group.properties).toEqual({ font: { color: "#FF0000" } });
+	});
+
+	it("deletes the first paragraph", async () => {
+		const before = (await processCommand(
+			"cmd-dp2-setup",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		const alpha = before.paragraphs[0];
+
+		await processCommand("cmd-dp2", "powerpoint_delete_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			paragraphStart: alpha.start,
+			paragraphLength: alpha.length,
+		});
+
+		const after = (await processCommand(
+			"cmd-dp2-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
+			"Beta",
+			"Gamma",
+			"Delta",
+			"Epsilon",
+		]);
+	});
+
+	it("deletes the last paragraph", async () => {
+		const before = (await processCommand(
+			"cmd-dp3-setup",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		const epsilon = before.paragraphs[4];
+
+		await processCommand("cmd-dp3", "powerpoint_delete_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			paragraphStart: epsilon.start,
+			paragraphLength: epsilon.length,
+		});
+
+		const after = (await processCommand(
+			"cmd-dp3-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
+			"Alpha",
+			"Beta",
+			"Gamma",
+			"Delta",
+		]);
+	});
+
+	it("empties the text when deleting the only remaining paragraph", async () => {
+		await processCommand("cmd-dp4a", "powerpoint_update_shape_text", {
+			slideIndex: 0,
+			shapeId: "s7",
+			text: "Solo",
+		});
+
+		await processCommand("cmd-dp4", "powerpoint_delete_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			paragraphStart: 0,
+			paragraphLength: 4,
+		});
+
+		const after = (await processCommand(
+			"cmd-dp4-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(after.paragraphs.map((p: any) => p.text)).toEqual([""]);
+	});
+
+	it("returns error when start/length are out of range", async () => {
+		const result = (await processCommand("cmd-dp5", "powerpoint_delete_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			paragraphStart: 0,
+			paragraphLength: 9999,
+		})) as any;
+
+		expect(result.error).toContain("out of range");
+	});
+
+	it("returns error when expectedText does not match the current text at the range", async () => {
+		const result = (await processCommand("cmd-dp6", "powerpoint_delete_paragraph", {
+			slideIndex: 0,
+			shapeId: "s7",
+			paragraphStart: 0,
+			paragraphLength: 5,
+			expectedText: "Wrong",
+		})) as any;
+
+		expect(result.error).toContain("expectedText");
+	});
+
+	it("returns error for shape with no text frame", async () => {
+		const result = (await processCommand("cmd-dp7", "powerpoint_delete_paragraph", {
+			slideIndex: 0,
+			shapeId: "s3", // s3 is an Image
+			paragraphStart: 0,
+			paragraphLength: 1,
+		})) as any;
+
+		expect(result.error).toContain("does not support text");
+	});
+
+	it("returns error for missing shape", async () => {
+		const result = (await processCommand("cmd-dp8", "powerpoint_delete_paragraph", {
+			slideIndex: 0,
+			shapeId: "nope",
+			paragraphStart: 0,
+			paragraphLength: 1,
+		})) as any;
+
+		expect(result.error).toContain("not found");
+	});
+});
+
 describe("powerpoint_update_speaker_notes", () => {
 	it("writes notes to a slide", async () => {
 		const result = (await processCommand(

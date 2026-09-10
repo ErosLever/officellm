@@ -385,6 +385,25 @@ public static class McpToolEngine
         },
         new
         {
+            name = "powerpoint_delete_paragraph",
+            description = "Deletes a paragraph from a shape's text frame, identified by the paragraphStart/paragraphLength span of its text (as returned by powerpoint_get_shape_paragraphs' start/length fields). Removes the paragraph's text and one adjacent paragraph delimiter so the paragraph count actually drops by one; other paragraphs' text and formatting are untouched. expectedText is checked against the actual text at that range before mutating, so the call is rejected if the shape's text changed since it was last read.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["shapeId"] = new { type = "string", description = "Shape ID or name" },
+                    ["paragraphStart"] = new { type = "integer", description = "REQUIRED. Character offset into the shape's text where the paragraph begins (the 'start' field returned by powerpoint_get_shape_paragraphs)." },
+                    ["paragraphLength"] = new { type = "integer", description = "REQUIRED. Length in characters of the paragraph (the 'length' field returned by powerpoint_get_shape_paragraphs)." },
+                    ["expectedText"] = new { type = "string", description = "Optional. Text expected at [paragraphStart, paragraphStart+paragraphLength) — checked before mutating; if it doesn't match, the call is rejected rather than deleting the wrong paragraph." }
+                },
+                required = new[] { "instanceId", "slideIndex", "shapeId", "paragraphStart", "paragraphLength" }
+            }
+        },
+        new
+        {
             name = "powerpoint_update_speaker_notes",
             description = "Sets speaker notes for a specific slide. Replaces any existing notes. Applies directly.",
             inputSchema = new
@@ -1068,6 +1087,7 @@ public static class McpToolEngine
         "powerpoint_update_shape_properties",
         "powerpoint_update_text_range_properties",
         "powerpoint_insert_paragraph",
+        "powerpoint_delete_paragraph",
         "powerpoint_update_speaker_notes",
         "powerpoint_add_textbox",
         "powerpoint_add_image",
@@ -1319,6 +1339,14 @@ public static class McpToolEngine
                 "underline", "strikethrough", "doubleStrikethrough", "allCaps", "smallCaps", "subscript", "superscript",
                 "horizontalAlignment", "indentLevel",
                 "bulletType", "bulletStyle", "bulletVisible");
+            if (unknownParamError != null)
+                return unknownParamError;
+        }
+
+        if (name == "powerpoint_delete_paragraph" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "shapeId", "paragraphStart", "paragraphLength", "expectedText");
             if (unknownParamError != null)
                 return unknownParamError;
         }

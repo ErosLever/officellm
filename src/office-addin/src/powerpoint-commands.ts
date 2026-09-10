@@ -68,6 +68,9 @@ export async function processCommand(
 			case "powerpoint_insert_paragraph":
 				result = await handleInsertParagraph(args);
 				break;
+			case "powerpoint_delete_paragraph":
+				result = await handleDeleteParagraph(args);
+				break;
 			case "powerpoint_update_speaker_notes":
 				result = await handleUpdateSpeakerNotes(args);
 				break;
@@ -1343,6 +1346,72 @@ async function handleInsertParagraph(args: unknown): Promise<unknown> {
 		}
 
 		return { slideIndex, shapeId, start: newStart, length: newLength, updated };
+	});
+}
+
+async function handleDeleteParagraph(args: unknown): Promise<unknown> {
+	const config = args as {
+		slideIndex?: number;
+		shapeId?: string;
+		paragraphStart?: number;
+		paragraphLength?: number;
+		expectedText?: string;
+	};
+	const { slideIndex = 0, shapeId = "", paragraphStart = 0, paragraphLength = 0 } = config;
+
+	return runInPowerPoint(async (ctx) => {
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return resolved;
+		const { shape } = resolved;
+
+		const tf = shape.getTextFrameOrNullObject();
+		ctx.load(tf, "isNullObject,textRange/text");
+		await ctx.sync();
+
+		if (tf.isNullObject) {
+			return {
+				error: `Shape '${shapeId}' does not support text (type: image/table/etc)`,
+			};
+		}
+
+		const fullText = safeStr(tf.textRange.text);
+		if (paragraphStart < 0 || paragraphStart + paragraphLength > fullText.length) {
+			return {
+				error: `paragraphStart/paragraphLength out of range for shape text (length ${fullText.length})`,
+			};
+		}
+
+		const range = tf.textRange.getSubstring(paragraphStart, paragraphLength);
+		ctx.load(range, "text");
+		await ctx.sync();
+
+		if (config.expectedText !== undefined && safeStr(range.text) !== config.expectedText) {
+			return {
+				error:
+					"Text at [paragraphStart,paragraphLength) does not match expectedText — shape text may have changed since it was last read.",
+			};
+		}
+
+		// Deleting only [paragraphStart, paragraphStart+paragraphLength) would
+		// leave the paragraph's bounding "\r" behind, splitting an empty
+		// paragraph in two. Consume one adjacent "\r" — the following one if
+		// this isn't the last paragraph, otherwise the preceding one — so the
+		// paragraph count actually drops by one. A lone remaining paragraph
+		// has no adjacent "\r" at all; its text is simply emptied, matching
+		// how PowerPoint text frames always keep at least one paragraph.
+		let delStart = paragraphStart;
+		let delEnd = paragraphStart + paragraphLength;
+		if (delEnd < fullText.length && fullText[delEnd] === "\r") {
+			delEnd += 1;
+		} else if (delStart > 0 && fullText[delStart - 1] === "\r") {
+			delStart -= 1;
+		}
+
+		const deleteRange = tf.textRange.getSubstring(delStart, delEnd - delStart);
+		deleteRange.text = "";
+		await ctx.sync();
+
+		return { slideIndex, shapeId, paragraphStart, paragraphLength, deleted: true };
 	});
 }
 
