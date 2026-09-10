@@ -45,6 +45,9 @@ export async function processCommand(
 			case "powerpoint_get_table":
 				result = await handleGetTable(args);
 				break;
+			case "powerpoint_get_shape_paragraphs":
+				result = await handleGetShapeParagraphs(args);
+				break;
 			case "powerpoint_get_selection":
 				result = await handleGetSelection(args);
 				break;
@@ -58,6 +61,9 @@ export async function processCommand(
 				break;
 			case "powerpoint_update_shape_properties":
 				result = await handleUpdateShapeProperties(args);
+				break;
+			case "powerpoint_update_text_range_properties":
+				result = await handleUpdateTextRangeProperties(args);
 				break;
 			case "powerpoint_update_speaker_notes":
 				result = await handleUpdateSpeakerNotes(args);
@@ -162,7 +168,10 @@ export async function processCommand(
 		result = { error: errorMessage };
 	}
 
-	await reportResult(commandId, success, undefined, result);
+	const errorStr = (!success && result && typeof result === "object" && "error" in result)
+		? (result as any).error as string
+		: undefined;
+	await reportResult(commandId, success, errorStr, result);
 	return result;
 }
 
@@ -203,6 +212,154 @@ function safeStr(val: any, fallback = ""): string {
 
 function safeNum(val: any, fallback = 0): number {
 	return typeof val === "number" ? val : fallback;
+}
+
+/**
+ * Splits shape text into paragraphs on `\r` (paragraph boundary; `\n` is a
+ * soft line break within a paragraph). `length` excludes the trailing `\r`.
+ */
+export function splitParagraphs(
+	text: string,
+): { text: string; start: number; length: number }[] {
+	// Each paragraph's start is the previous paragraph's end plus the `\r`
+	// delimiter that was consumed by split() — reduce carries that running
+	// offset forward instead of a mutable loop counter.
+	return text
+		.split("\r")
+		.reduce<{ text: string; start: number; length: number }[]>((acc, part) => {
+			const prev = acc[acc.length - 1];
+			const start = prev ? prev.start + prev.length + 1 : 0;
+			return [...acc, { text: part, start, length: part.length }];
+		}, []);
+}
+
+const TEXT_RANGE_PROP_PATH = [
+	"font/name",
+	"font/size",
+	"font/bold",
+	"font/italic",
+	"font/color",
+	"font/underline",
+	"font/strikethrough",
+	"font/doubleStrikethrough",
+	"font/allCaps",
+	"font/smallCaps",
+	"font/subscript",
+	"font/superscript",
+	"paragraphFormat/horizontalAlignment",
+	"paragraphFormat/indentLevel",
+	"paragraphFormat/bulletFormat/type",
+	"paragraphFormat/bulletFormat/style",
+	"paragraphFormat/bulletFormat/visible",
+].join(",");
+
+type RangeProperties = {
+	font: Record<string, unknown>;
+	paragraphFormat: Record<string, unknown>;
+};
+
+// Reads a loaded TextRange (whole-shape range or a getSubstring() result)
+// into the same flat font/paragraphFormat shape handleUpdateShapeProperties
+// accepts, so getter output and setter input line up field-for-field.
+function extractRangeProperties(range: any): RangeProperties {
+	return {
+		font: {
+			fontName: safeStr(range.font.name),
+			fontSize: safeNum(range.font.size),
+			bold: !!range.font.bold,
+			italic: !!range.font.italic,
+			color: safeStr(range.font.color),
+			underline: safeStr(range.font.underline),
+			strikethrough: !!range.font.strikethrough,
+			doubleStrikethrough: !!range.font.doubleStrikethrough,
+			allCaps: !!range.font.allCaps,
+			smallCaps: !!range.font.smallCaps,
+			subscript: !!range.font.subscript,
+			superscript: !!range.font.superscript,
+		},
+		paragraphFormat: {
+			horizontalAlignment: safeStr(range.paragraphFormat.horizontalAlignment),
+			indentLevel: safeNum(range.paragraphFormat.indentLevel),
+			bulletType: safeStr(range.paragraphFormat.bulletFormat.type),
+			bulletStyle: safeStr(range.paragraphFormat.bulletFormat.style),
+			bulletVisible: !!range.paragraphFormat.bulletFormat.visible,
+		},
+	};
+}
+
+// Declarative setters keyed by the same config property names used in
+// RangeProperties/extractRangeProperties, so handleUpdateTextRangeProperties
+// can apply "only the keys present in config" without an if-chain per field.
+const FONT_SETTERS: Record<string, (font: any, value: any) => void> = {
+	fontName: (font, v) => (font.name = v),
+	fontSize: (font, v) => (font.size = v),
+	bold: (font, v) => (font.bold = v),
+	italic: (font, v) => (font.italic = v),
+	color: (font, v) => (font.color = v),
+	underline: (font, v) => (font.underline = v),
+	strikethrough: (font, v) => (font.strikethrough = v),
+	doubleStrikethrough: (font, v) => (font.doubleStrikethrough = v),
+	allCaps: (font, v) => (font.allCaps = v),
+	smallCaps: (font, v) => (font.smallCaps = v),
+	subscript: (font, v) => (font.subscript = v),
+	superscript: (font, v) => (font.superscript = v),
+};
+
+const PARAGRAPH_FORMAT_SETTERS: Record<string, (pf: any, value: any) => void> = {
+	horizontalAlignment: (pf, v) => (pf.horizontalAlignment = v),
+	indentLevel: (pf, v) => (pf.indentLevel = v),
+};
+
+const BULLET_FORMAT_SETTERS: Record<string, (bf: any, value: any) => void> = {
+	bulletType: (bf, v) => (bf.type = v),
+	bulletStyle: (bf, v) => (bf.style = v),
+	bulletVisible: (bf, v) => (bf.visible = v),
+};
+
+/**
+ * Applies every setter whose config key is present (!== undefined) to
+ * `target`, returning the applied key names — replaces a per-field
+ * `if (config.x !== undefined) { ...; updated.push("x") }` chain.
+ */
+function applyDefinedProperties(
+	config: Record<string, unknown>,
+	target: any,
+	setters: Record<string, (target: any, value: any) => void>,
+): string[] {
+	return Object.keys(setters).filter((key) => config[key] !== undefined) // only requested keys
+		.map((key) => {
+			setters[key](target, config[key]);
+			return key;
+		});
+}
+
+/**
+ * Diffs `full` against `base`, keeping only the categories/keys whose values
+ * differ. Used to shrink a paragraph's complete properties down to just its
+ * overrides relative to the shape's defaultProperties.
+ */
+function diffRangeProperties(
+	full: RangeProperties,
+	base: RangeProperties,
+): Record<string, Record<string, unknown>> {
+	// Two-level reduce: outer walks font/paragraphFormat, inner walks each
+	// category's keys, keeping only ones whose stringified value changed.
+	// Categories/keys that fully match `base` are omitted entirely rather
+	// than kept as empty objects/false-y placeholders.
+	return (["font", "paragraphFormat"] as const).reduce<Record<string, Record<string, unknown>>>(
+		(diff, category) => {
+			const catDiff = Object.keys(full[category]).reduce<Record<string, unknown>>(
+				(acc, key) => {
+					const same =
+						JSON.stringify(full[category][key]) === JSON.stringify(base[category][key]);
+					return same ? acc : { ...acc, [key]: full[category][key] };
+				},
+				{},
+			);
+			return Object.keys(catDiff).length > 0 ? { ...diff, [category]: catDiff } : diff;
+		},
+		{},
+	);
 }
 
 // ── Read tools ──────────────────────────────────────────────────
@@ -553,6 +710,89 @@ async function handleGetTable(args: unknown): Promise<unknown> {
 			rowCount: rows,
 			columnCount: cols,
 			cells,
+		};
+	});
+}
+
+async function handleGetShapeParagraphs(args: unknown): Promise<unknown> {
+	const config = args as { slideIndex?: number; shapeId?: string };
+	const slideIndex = config.slideIndex ?? 0;
+	const shapeId = config.shapeId ?? "";
+
+	return runInPowerPoint(async (ctx) => {
+		const pres = ctx.presentation;
+		pres.load("slides");
+		await ctx.sync();
+
+		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
+			return { error: `Slide index ${slideIndex} out of range` };
+		}
+
+		const slide = pres.slides.items[slideIndex];
+		slide.load("shapes/items/$none");
+		await ctx.sync();
+
+		for (const s of slide.shapes.items) {
+			s.load("id,name");
+		}
+		await ctx.sync();
+
+		const shape = slide.shapes.items.find(
+			(s: any) => safeStr(s.id) === shapeId || safeStr(s.name) === shapeId,
+		);
+		if (!shape) {
+			return { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
+		}
+
+		const tf = shape.getTextFrameOrNullObject();
+		ctx.load(tf, "isNullObject,textRange/text");
+		await ctx.sync();
+
+		if (tf.isNullObject) {
+			return {
+				error: `Shape '${shapeId}' does not support text (type: image/table/etc)`,
+			};
+		}
+
+		const fullText = safeStr(tf.textRange.text);
+		const paragraphSpans = splitParagraphs(fullText);
+
+		// Batch: load the whole-range properties (the defaultProperties
+		// baseline) plus one getSubstring() range per paragraph, all in a
+		// single sync — mirrors handleGetTable's create-N-then-one-sync shape.
+		ctx.load(tf.textRange, TEXT_RANGE_PROP_PATH);
+		const paragraphRanges = paragraphSpans.map((span) => {
+			const range = tf.textRange.getSubstring(span.start, span.length);
+			ctx.load(range, TEXT_RANGE_PROP_PATH);
+			return range;
+		});
+		await ctx.sync();
+
+		const defaultProperties = extractRangeProperties(tf.textRange);
+
+		// Dedup by content: identical diffs (even for non-adjacent
+		// paragraphs) share one groupId/propertyGroups entry.
+		const groupIdByDiffKey = new Map<string, number>();
+		const propertyGroups: { groupId: number; properties: Record<string, unknown> }[] = [];
+		const paragraphs = paragraphSpans.map((span, index) => {
+			const diff = diffRangeProperties(extractRangeProperties(paragraphRanges[index]), defaultProperties);
+			const diffKey = JSON.stringify(diff);
+			let groupId = groupIdByDiffKey.get(diffKey);
+			if (groupId === undefined) {
+				groupId = propertyGroups.length;
+				groupIdByDiffKey.set(diffKey, groupId);
+				propertyGroups.push({ groupId, properties: diff });
+			}
+			return { index, text: span.text, start: span.start, length: span.length, groupId };
+		});
+
+		return {
+			slideIndex,
+			shapeId,
+			fullText,
+			defaultProperties,
+			propertyGroups,
+			paragraphs,
 		};
 	});
 }
@@ -967,6 +1207,80 @@ async function handleUpdateShapeProperties(args: unknown): Promise<unknown> {
 		await ctx.sync();
 
 		return { slideIndex, shapeId, updated };
+	});
+}
+
+async function handleUpdateTextRangeProperties(args: unknown): Promise<unknown> {
+	const config = args as {
+		slideIndex?: number;
+		shapeId?: string;
+		start?: number;
+		length?: number;
+		expectedText?: string;
+		[key: string]: unknown;
+	};
+	const { slideIndex = 0, shapeId = "", start = 0, length = 0 } = config;
+
+	return runInPowerPoint(async (ctx) => {
+		const pres = ctx.presentation;
+		pres.load("slides");
+		await ctx.sync();
+
+		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
+			return { error: `Slide index ${slideIndex} out of range` };
+		}
+
+		const slide = pres.slides.items[slideIndex];
+		slide.load("shapes/items/$none");
+		await ctx.sync();
+
+		for (const s of slide.shapes.items) {
+			s.load("id,name");
+		}
+		await ctx.sync();
+
+		const shape = slide.shapes.items.find(
+			(s: any) => safeStr(s.id) === shapeId || safeStr(s.name) === shapeId,
+		);
+		if (!shape) {
+			return { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
+		}
+
+		const tf = shape.getTextFrameOrNullObject();
+		ctx.load(tf, "isNullObject,textRange/text");
+		await ctx.sync();
+
+		if (tf.isNullObject) {
+			return {
+				error: `Shape '${shapeId}' does not support text (type: image/table/etc)`,
+			};
+		}
+
+		const fullText = safeStr(tf.textRange.text);
+		if (start < 0 || start + length > fullText.length) {
+			return { error: `start/length out of range for shape text (length ${fullText.length})` };
+		}
+
+		const range = tf.textRange.getSubstring(start, length);
+		ctx.load(range, `text,${TEXT_RANGE_PROP_PATH}`);
+		await ctx.sync();
+
+		if (config.expectedText !== undefined && safeStr(range.text) !== config.expectedText) {
+			return {
+				error:
+					"Text at [start,length) does not match expectedText — shape text may have changed since it was last read.",
+			};
+		}
+
+		const updated = [
+			...applyDefinedProperties(config, range.font, FONT_SETTERS),
+			...applyDefinedProperties(config, range.paragraphFormat, PARAGRAPH_FORMAT_SETTERS),
+			...applyDefinedProperties(config, range.paragraphFormat.bulletFormat, BULLET_FORMAT_SETTERS),
+		];
+
+		await ctx.sync();
+
+		return { slideIndex, shapeId, start, length, updated };
 	});
 }
 

@@ -48,6 +48,13 @@ export interface MockShapeData {
 		bulletStyle?: string;
 		bulletVisible?: boolean;
 	};
+	// Per-paragraph overrides, indexed by paragraph index — independent of
+	// the flat font/paragraphFormat bags above, which back the whole-shape
+	// textRange used by powerpoint_update_shape_properties.
+	paragraphs?: Array<{
+		font?: MockShapeData["font"];
+		paragraphFormat?: MockShapeData["paragraphFormat"];
+	}>;
 	textFrame?: {
 		marginTop?: number;
 		marginBottom?: number;
@@ -803,6 +810,13 @@ class MockShape {
 
 	getTextFrameOrNullObject(): MockTextFrame {
 		const hasText = this._data.text !== undefined;
+		// getTextFrameOrNullObject() creates a new backing-data object each
+		// call (per this file's header comment), but `paragraphs` must be
+		// the SAME array across calls for setter mutations made via one
+		// call's getSubstring() to be visible to a later call's getter —
+		// so vivify it on the persistent MockShapeData (this._data), not on
+		// the fresh copy below, before handing out a reference to it.
+		this._data.paragraphs ??= [];
 		return new MockTextFrame(
 			this._ctx,
 			{
@@ -810,6 +824,7 @@ class MockShape {
 				font: this._data.font,
 				paragraphFormat: this._data.paragraphFormat,
 				textFrame: this._data.textFrame,
+				paragraphs: this._data.paragraphs,
 			},
 			hasText,
 		);
@@ -857,6 +872,7 @@ type TextFrameBackingData = {
 	font?: MockShapeData["font"];
 	paragraphFormat?: MockShapeData["paragraphFormat"];
 	textFrame?: MockShapeData["textFrame"];
+	paragraphs?: MockShapeData["paragraphs"];
 };
 
 class MockTextFrame {
@@ -995,6 +1011,40 @@ class MockTextRange {
 	_populate(props: string[]) {
 		this.font._populate(props);
 		this.paragraphFormat._populate(props);
+	}
+
+	/**
+	 * Mirrors PowerPoint.TextRange.getSubstring(start, length) for the
+	 * single-paragraph-range case — the only shape getSubstring() calls
+	 * take in this codebase (see splitParagraphs in powerpoint-commands.ts).
+	 * The paragraph index is just the count of `\r` delimiters before
+	 * `start`; the substring itself is a direct slice, no re-splitting of
+	 * the whole text needed.
+	 */
+	getSubstring(start: number, length: number): MockTextRange {
+		const index = this._data.text.slice(0, start).split("\r").length - 1;
+
+		if (!this._data.paragraphs) this._data.paragraphs = [];
+		if (!this._data.paragraphs[index]) this._data.paragraphs[index] = {};
+		const paragraphData = this._data.paragraphs[index];
+		// Merge the shape's flat font/paragraphFormat underneath any
+		// paragraph-specific override (fixture-provided, or set by an
+		// earlier getSubstring-backed mutation) so a partial override
+		// still inherits every other key from the shape's real values —
+		// matching real PowerPoint, where an untouched sub-range inherits
+		// the whole range's formatting rather than reverting to blank
+		// defaults. Existing override keys win via spread order.
+		paragraphData.font = { ...this._data.font, ...paragraphData.font };
+		paragraphData.paragraphFormat = {
+			...this._data.paragraphFormat,
+			...paragraphData.paragraphFormat,
+		};
+
+		return new MockTextRange(this._ctx, {
+			text: this._data.text.substring(start, start + length),
+			font: paragraphData.font,
+			paragraphFormat: paragraphData.paragraphFormat,
+		});
 	}
 }
 

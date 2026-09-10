@@ -23,6 +23,7 @@ All 131 MCP tools exposed by this project, grouped by host application and categ
 | `powerpoint_get_slide_image` | Renders a slide as a PNG (base64) |
 | `powerpoint_get_shape_image` | Renders a single shape as a PNG (base64) |
 | `powerpoint_get_table` | Reads all cell text from a table shape |
+| `powerpoint_get_shape_paragraphs` | Returns a shape's text split into paragraphs, each with a start/length span and a groupId pointing into a deduplicated set of font/paragraph/bullet property diffs against the shape's default properties |
 | `powerpoint_get_selection` | Current user selection (text or shapes) |
 | `powerpoint_get_speaker_notes` | Speaker notes for one slide or a range |
 
@@ -31,6 +32,7 @@ All 131 MCP tools exposed by this project, grouped by host application and categ
 |---|---|
 | `powerpoint_update_shape_text` | Updates a shape's text content |
 | `powerpoint_update_shape_properties` | Updates position, size, rotation, font, paragraph/bullet, and text frame properties of a shape |
+| `powerpoint_update_text_range_properties` | Updates font/paragraph/bullet properties on a specific character sub-range of a shape's text (e.g. a single paragraph), guarded by an optional expectedText check |
 | `powerpoint_update_speaker_notes` | Replaces speaker notes for a slide |
 
 ### Shape CRUD

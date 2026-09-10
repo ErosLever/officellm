@@ -79,6 +79,28 @@ function makeTestDeck(): MockPresentationData {
 						width: 30,
 						height: 20,
 					},
+					{
+						id: "s7",
+						name: "Bullet List 1",
+						type: "TextBox",
+						// 5 paragraphs: 0/2/4 share default formatting, 1 has a
+						// distinct indentLevel, 3 has a distinct font color —
+						// exercises dedup-by-content and non-adjacent grouping.
+						text: "Alpha\rBeta\rGamma\rDelta\rEpsilon",
+						left: 50,
+						top: 250,
+						width: 600,
+						height: 300,
+						font: { name: "Calibri", size: 24, color: "#000000" },
+						paragraphFormat: { horizontalAlignment: "Left", indentLevel: 0 },
+						paragraphs: [
+							undefined,
+							{ paragraphFormat: { indentLevel: 2 } },
+							undefined,
+							{ font: { color: "#FF0000" } },
+							undefined,
+						] as any,
+					},
 				],
 				notes: "Talk about revenue growth",
 			},
@@ -144,7 +166,7 @@ describe("powerpoint_get_deck_outline", () => {
 
 		expect(result.totalSlides).toBe(3);
 		expect(result.slides[0].title).toBe("Quarterly Results");
-		expect(result.slides[0].shapes).toHaveLength(4);
+		expect(result.slides[0].shapes).toHaveLength(5);
 		expect(result.slides[0].shapes[0].type).toBe("TextBox");
 		expect(result.slides[0].shapes[0].left).toBe(50);
 		expect(result.slides[0].shapes[0].width).toBe(600);
@@ -211,7 +233,7 @@ describe("powerpoint_get_slide", () => {
 		})) as any;
 
 		expect(result.slideIndex).toBe(0);
-		expect(result.shapes).toHaveLength(4);
+		expect(result.shapes).toHaveLength(5);
 
 		const title = result.shapes[0];
 		expect(title.id).toBe("s1");
@@ -322,6 +344,119 @@ describe("powerpoint_get_table", () => {
 			shapeId: "nope",
 		})) as any;
 		expect(result.error).toContain("not found");
+	});
+});
+
+describe("powerpoint_get_shape_paragraphs", () => {
+	it("returns fullText and defaultProperties matching the shape's whole-range values", async () => {
+		const result = (await processCommand(
+			"cmd-gp1",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(result.fullText).toBe("Alpha\rBeta\rGamma\rDelta\rEpsilon");
+		expect(result.defaultProperties.font).toMatchObject({
+			fontName: "Calibri",
+			fontSize: 24,
+			color: "#000000",
+		});
+		expect(result.defaultProperties.paragraphFormat).toMatchObject({
+			horizontalAlignment: "Left",
+			indentLevel: 0,
+		});
+	});
+
+	it("groups non-adjacent paragraphs with identical formatting under the same groupId", async () => {
+		const result = (await processCommand(
+			"cmd-gp2",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		const [p0, p1, p2, p3, p4] = result.paragraphs;
+		expect(p0.groupId).toBe(p2.groupId);
+		expect(p0.groupId).toBe(p4.groupId);
+		expect(p1.groupId).not.toBe(p0.groupId);
+		expect(p3.groupId).not.toBe(p0.groupId);
+		expect(p1.groupId).not.toBe(p3.groupId);
+	});
+
+	it("gives a paragraph matching defaultProperties exactly an empty properties diff", async () => {
+		const result = (await processCommand(
+			"cmd-gp3",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		const group0 = result.propertyGroups.find(
+			(g: any) => g.groupId === result.paragraphs[0].groupId,
+		);
+		expect(group0.properties).toEqual({});
+	});
+
+	it("isolates a distinct indentLevel override to only its own group", async () => {
+		const result = (await processCommand(
+			"cmd-gp4",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		const group1 = result.propertyGroups.find(
+			(g: any) => g.groupId === result.paragraphs[1].groupId,
+		);
+		expect(group1.properties).toEqual({
+			paragraphFormat: { indentLevel: 2 },
+		});
+	});
+
+	it("isolates a distinct font color override to only its own group", async () => {
+		const result = (await processCommand(
+			"cmd-gp5",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		const group3 = result.propertyGroups.find(
+			(g: any) => g.groupId === result.paragraphs[3].groupId,
+		);
+		expect(group3.properties).toEqual({ font: { color: "#FF0000" } });
+	});
+
+	it("reports each paragraph's text and start/length spans", async () => {
+		const result = (await processCommand(
+			"cmd-gp6",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(result.paragraphs.map((p: any) => p.text)).toEqual([
+			"Alpha",
+			"Beta",
+			"Gamma",
+			"Delta",
+			"Epsilon",
+		]);
+		expect(result.paragraphs[1].start).toBe(6); // "Alpha\r".length
+		expect(result.paragraphs[1].length).toBe(4); // "Beta".length
+	});
+
+	it("returns error for missing shape", async () => {
+		const result = (await processCommand(
+			"cmd-gp7",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "nope" },
+		)) as any;
+		expect(result.error).toContain("not found");
+	});
+
+	it("returns error for shape with no text frame", async () => {
+		const result = (await processCommand(
+			"cmd-gp8",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s3" }, // s3 is an Image
+		)) as any;
+		expect(result.error).toContain("does not support text");
 	});
 });
 
@@ -510,6 +645,117 @@ describe("powerpoint_update_shape_properties", () => {
 	});
 });
 
+describe("powerpoint_update_text_range_properties", () => {
+	it("updates indentLevel and a font property on only the targeted paragraph", async () => {
+		const before = (await processCommand(
+			"cmd-utr-setup",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		const p2 = before.paragraphs[2]; // "Gamma", starts in the default group
+
+		const result = (await processCommand(
+			"cmd-utr1",
+			"powerpoint_update_text_range_properties",
+			{
+				slideIndex: 0,
+				shapeId: "s7",
+				start: p2.start,
+				length: p2.length,
+				expectedText: p2.text,
+				indentLevel: 3,
+				bold: true,
+			},
+		)) as any;
+
+		expect(result.updated).toContain("indentLevel");
+		expect(result.updated).toContain("bold");
+
+		const after = (await processCommand(
+			"cmd-utr-verify",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		// Only paragraph 2's group changed; its siblings (0, 4) stay grouped together.
+		expect(after.paragraphs[2].groupId).not.toBe(before.paragraphs[0].groupId);
+		expect(after.paragraphs[0].groupId).toBe(after.paragraphs[4].groupId);
+
+		const changedGroup = after.propertyGroups.find(
+			(g: any) => g.groupId === after.paragraphs[2].groupId,
+		);
+		expect(changedGroup.properties).toEqual({
+			font: { bold: true },
+			paragraphFormat: { indentLevel: 3 },
+		});
+	});
+
+	it("returns error when expectedText does not match the current text at [start,length)", async () => {
+		const result = (await processCommand(
+			"cmd-utr2",
+			"powerpoint_update_text_range_properties",
+			{
+				slideIndex: 0,
+				shapeId: "s7",
+				start: 0,
+				length: 5, // "Alpha"
+				expectedText: "Wrong",
+				bold: true,
+			},
+		)) as any;
+
+		expect(result.error).toContain("expectedText");
+	});
+
+	it("returns error when start/length are out of range for the shape text", async () => {
+		const result = (await processCommand(
+			"cmd-utr3",
+			"powerpoint_update_text_range_properties",
+			{
+				slideIndex: 0,
+				shapeId: "s7",
+				start: 0,
+				length: 9999,
+				bold: true,
+			},
+		)) as any;
+
+		expect(result.error).toContain("out of range");
+	});
+
+	it("returns error for shape with no text frame", async () => {
+		const result = (await processCommand(
+			"cmd-utr4",
+			"powerpoint_update_text_range_properties",
+			{
+				slideIndex: 0,
+				shapeId: "s3", // s3 is an Image
+				start: 0,
+				length: 1,
+				bold: true,
+			},
+		)) as any;
+
+		expect(result.error).toContain("does not support text");
+	});
+
+	it("returns error for missing shape", async () => {
+		const result = (await processCommand(
+			"cmd-utr5",
+			"powerpoint_update_text_range_properties",
+			{
+				slideIndex: 0,
+				shapeId: "nope",
+				start: 0,
+				length: 1,
+				bold: true,
+			},
+		)) as any;
+
+		expect(result.error).toContain("not found");
+	});
+});
+
 describe("powerpoint_update_speaker_notes", () => {
 	it("writes notes to a slide", async () => {
 		const result = (await processCommand(
@@ -540,7 +786,7 @@ describe("powerpoint_add_textbox", () => {
 
 		expect(result.slideIndex).toBe(0);
 		expect(result.name).toBeTruthy();
-		expect(mock.data.slides[0].shapes).toHaveLength(5); // was 4
+		expect(mock.data.slides[0].shapes).toHaveLength(6); // was 5
 	});
 });
 

@@ -113,7 +113,10 @@ export async function processCommand(
 		result = { error: errorMessage };
 	}
 
-	await reportResult(commandId, success, undefined, result);
+	const errorStr = (!success && result && typeof result === "object" && "error" in result)
+		? (result as any).error as string
+		: undefined;
+	await reportResult(commandId, success, errorStr, result);
 	return result;
 }
 

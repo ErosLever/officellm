@@ -201,6 +201,22 @@ public static class McpToolEngine
         },
         new
         {
+            name = "powerpoint_get_shape_paragraphs",
+            description = "Returns a shape's text broken into paragraphs, each with its own start/length span and a groupId pointing into propertyGroups — a deduplicated list of font/paragraph/bullet property diffs against the shape's defaultProperties baseline (read from the whole text range). Use this to inspect per-paragraph formatting (e.g. differing indent levels or bullet styles) before targeting one paragraph with powerpoint_update_text_range_properties.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["shapeId"] = new { type = "string", description = "Shape ID or name" }
+                },
+                required = new[] { "instanceId", "slideIndex", "shapeId" }
+            }
+        },
+        new
+        {
             name = "powerpoint_get_selection",
             description = "Returns what the user currently has selected in PowerPoint: selected text (with formatting and parent shape), selected shapes (with IDs and properties), or empty selection. Use this to understand user intent context.",
             inputSchema = new
@@ -278,9 +294,9 @@ public static class McpToolEngine
                     ["subscript"] = new { type = "boolean", description = "Subscript on/off." },
                     ["superscript"] = new { type = "boolean", description = "Superscript on/off." },
                     ["horizontalAlignment"] = new { type = "string", description = "Paragraph horizontal alignment: 'Left', 'Center', 'Right', 'Justify', 'JustifyLow', 'Distributed', 'ThaiDistributed'." },
-                    ["indentLevel"] = new { type = "number", description = "Paragraph indent level. Requires PowerPointApi 1.10 — supported on Windows only (Microsoft 365 Version 2601, Build 19610.20002+), not on Mac or web." },
-                    ["bulletType"] = new { type = "string", description = "Bullet type: 'None', 'Numbered', 'Unnumbered'. Requires PowerPointApi 1.10 — Windows only, not supported on Mac or web." },
-                    ["bulletStyle"] = new { type = "string", description = "Bullet style, e.g. 'ArabicNumeralPeriod', 'RomanUppercasePeriod' (see Office JS PowerPoint.BulletStyle enum for the full list). Requires PowerPointApi 1.10 — Windows only, not supported on Mac or web." },
+                    ["indentLevel"] = new { type = "number", description = "Paragraph indent level. Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
+                    ["bulletType"] = new { type = "string", description = "Bullet type: 'None', 'Numbered', 'Unnumbered'. Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
+                    ["bulletStyle"] = new { type = "string", description = "Bullet style, e.g. 'ArabicNumeralPeriod', 'RomanUppercasePeriod' (see Office JS PowerPoint.BulletStyle enum for the full list). Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
                     ["bulletVisible"] = new { type = "boolean", description = "Whether the bullet/number is shown for the paragraph." },
                     ["textMarginTop"] = new { type = "number", description = "Text frame top inset margin in points." },
                     ["textMarginBottom"] = new { type = "number", description = "Text frame bottom inset margin in points." },
@@ -291,6 +307,42 @@ public static class McpToolEngine
                     ["verticalAlignment"] = new { type = "string", description = "Text frame vertical alignment: 'Top', 'Middle', 'Bottom', 'TopCentered', 'MiddleCentered', 'BottomCentered'." }
                 },
                 required = new[] { "instanceId", "slideIndex", "shapeId" }
+            }
+        },
+        new
+        {
+            name = "powerpoint_update_text_range_properties",
+            description = "Updates font/paragraph/bullet properties on a specific character sub-range of a shape's text (e.g. a single paragraph returned by powerpoint_get_shape_paragraphs), rather than the shape's entire text range. Pass start/length exactly as returned by that tool; expectedText is checked against the actual text at that range before mutating, so the call is rejected if the shape's text changed since it was last read instead of silently corrupting the wrong range.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["shapeId"] = new { type = "string", description = "Shape ID or name" },
+                    ["start"] = new { type = "integer", description = "REQUIRED. Character offset into the shape's text where the target range begins (as returned by powerpoint_get_shape_paragraphs)." },
+                    ["length"] = new { type = "integer", description = "REQUIRED. Length in characters of the target range (as returned by powerpoint_get_shape_paragraphs)." },
+                    ["expectedText"] = new { type = "string", description = "Optional. Text expected at [start, start+length) — checked before mutating; if it doesn't match, the call is rejected rather than applying changes to the wrong range." },
+                    ["fontName"] = new { type = "string", description = "Font family name (e.g. 'Arial')" },
+                    ["fontSize"] = new { type = "number", description = "Font size in points" },
+                    ["bold"] = new { type = "boolean", description = "Bold on/off" },
+                    ["italic"] = new { type = "boolean", description = "Italic on/off" },
+                    ["color"] = new { type = "string", description = "Font color as HTML hex (e.g. '#FF0000')" },
+                    ["underline"] = new { type = "string", description = "Underline style, e.g. 'Single', 'None'." },
+                    ["strikethrough"] = new { type = "boolean", description = "Single strikethrough on/off." },
+                    ["doubleStrikethrough"] = new { type = "boolean", description = "Double strikethrough on/off." },
+                    ["allCaps"] = new { type = "boolean", description = "All-caps text on/off." },
+                    ["smallCaps"] = new { type = "boolean", description = "Small-caps text on/off." },
+                    ["subscript"] = new { type = "boolean", description = "Subscript on/off." },
+                    ["superscript"] = new { type = "boolean", description = "Superscript on/off." },
+                    ["horizontalAlignment"] = new { type = "string", description = "Paragraph horizontal alignment: 'Left', 'Center', 'Right', 'Justify', 'JustifyLow', 'Distributed', 'ThaiDistributed'." },
+                    ["indentLevel"] = new { type = "number", description = "Paragraph indent level. Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
+                    ["bulletType"] = new { type = "string", description = "Bullet type: 'None', 'Numbered', 'Unnumbered'. Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
+                    ["bulletStyle"] = new { type = "string", description = "Bullet style, e.g. 'ArabicNumeralPeriod', 'RomanUppercasePeriod' (see Office JS PowerPoint.BulletStyle enum for the full list). Requires PowerPointApi 1.10. Confirmed working on Mac; verify on other target platforms before relying on it there." },
+                    ["bulletVisible"] = new { type = "boolean", description = "Whether the bullet/number is shown for the paragraph." }
+                },
+                required = new[] { "instanceId", "slideIndex", "shapeId", "start", "length" }
             }
         },
         new
@@ -971,10 +1023,12 @@ public static class McpToolEngine
         "powerpoint_get_slide_image",
         "powerpoint_get_shape_image",
         "powerpoint_get_table",
+        "powerpoint_get_shape_paragraphs",
         "powerpoint_get_selection",
         "powerpoint_get_speaker_notes",
         "powerpoint_update_shape_text",
         "powerpoint_update_shape_properties",
+        "powerpoint_update_text_range_properties",
         "powerpoint_update_speaker_notes",
         "powerpoint_add_textbox",
         "powerpoint_add_image",
@@ -1193,6 +1247,26 @@ public static class McpToolEngine
                 "bulletType", "bulletStyle", "bulletVisible",
                 "textMarginTop", "textMarginBottom", "textMarginLeft", "textMarginRight",
                 "autoSizeSetting", "wordWrap", "verticalAlignment");
+            if (unknownParamError != null)
+                return unknownParamError;
+        }
+
+        if (name == "powerpoint_get_shape_paragraphs" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "shapeId");
+            if (unknownParamError != null)
+                return unknownParamError;
+        }
+
+        if (name == "powerpoint_update_text_range_properties" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "shapeId", "start", "length", "expectedText",
+                "fontName", "fontSize", "bold", "italic", "color",
+                "underline", "strikethrough", "doubleStrikethrough", "allCaps", "smallCaps", "subscript", "superscript",
+                "horizontalAlignment", "indentLevel",
+                "bulletType", "bulletStyle", "bulletVisible");
             if (unknownParamError != null)
                 return unknownParamError;
         }
