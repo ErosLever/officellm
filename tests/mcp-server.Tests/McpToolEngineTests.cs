@@ -11,12 +11,12 @@ public class McpToolEngineTests
 	}
 
     [Fact]
-    public void GetToolDefinitions_Returns135Tools()
+    public void GetToolDefinitions_Returns136Tools()
     {
         var tools = McpToolEngine.GetToolDefinitions();
 
         Assert.NotNull(tools);
-        Assert.Equal(135, tools.Length);
+        Assert.Equal(136, tools.Length);
     }
 
     [Fact]
@@ -40,6 +40,7 @@ public class McpToolEngineTests
         Assert.Contains("powerpoint_get_shape_image", names);
         Assert.Contains("powerpoint_get_table", names);
         Assert.Contains("powerpoint_get_shape_paragraphs", names);
+        Assert.Contains("powerpoint_get_shape_text_markdown", names);
         Assert.Contains("powerpoint_get_selection", names);
         Assert.Contains("powerpoint_get_speaker_notes", names);
 

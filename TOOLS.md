@@ -1,6 +1,6 @@
 # Tool Reference
 
-All 135 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
+All 136 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
 
 ## Shared / Cross-cutting
 
@@ -24,6 +24,7 @@ All 135 MCP tools exposed by this project, grouped by host application and categ
 | `powerpoint_get_shape_image` | Renders a single shape as a PNG (base64) |
 | `powerpoint_get_table` | Reads all cell text from a table shape |
 | `powerpoint_get_shape_paragraphs` | Returns a shape's text split into paragraphs, each with a start/length span and a groupId pointing into a deduplicated set of font/paragraph/bullet property diffs against the shape's default properties |
+| `powerpoint_get_shape_text_markdown` | Renders a shape's paragraphs as an indented markdown-like list — `1.`/`2.` markers for numbered paragraphs, `bulletChar` (`-`/`*`) for others, indented per paragraph's indentLevel |
 | `powerpoint_get_selection` | Current user selection (text or shapes) |
 | `powerpoint_get_speaker_notes` | Speaker notes for one slide or a range |
 

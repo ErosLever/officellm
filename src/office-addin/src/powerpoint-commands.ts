@@ -48,6 +48,9 @@ export async function processCommand(
 			case "powerpoint_get_shape_paragraphs":
 				result = await handleGetShapeParagraphs(args);
 				break;
+			case "powerpoint_get_shape_text_markdown":
+				result = await handleGetShapeTextMarkdown(args);
+				break;
 			case "powerpoint_get_selection":
 				result = await handleGetSelection(args);
 				break;
@@ -220,6 +223,78 @@ function safeNum(val: any, fallback = 0): number {
 	return typeof val === "number" ? val : fallback;
 }
 
+const PARAGRAPH_ALIGNMENT_NAMES = [
+	"Left",
+	"Center",
+	"Right",
+	"Justify",
+	"JustifyLow",
+	"Distributed",
+	"ThaiDistributed",
+];
+
+const BULLET_TYPE_NAMES = ["Unsupported", "None", "Numbered", "Unnumbered"];
+
+const BULLET_STYLE_NAMES = [
+	"Unsupported",
+	"AlphabetLowercasePeriod",
+	"AlphabetUppercasePeriod",
+	"ArabicNumeralParenthesisRight",
+	"ArabicNumeralPeriod",
+	"RomanLowercaseParenthesesBoth",
+	"RomanLowercaseParenthesisRight",
+	"RomanLowercasePeriod",
+	"RomanUppercasePeriod",
+	"AlphabetLowercaseParenthesesBoth",
+	"AlphabetLowercaseParenthesisRight",
+	"AlphabetUppercaseParenthesesBoth",
+	"AlphabetUppercaseParenthesisRight",
+	"ArabicNumeralParenthesesBoth",
+	"ArabicNumeralPlain",
+	"RomanUppercaseParenthesesBoth",
+	"RomanUppercaseParenthesisRight",
+	"SimplifiedChinesePlain",
+	"SimplifiedChinesePeriod",
+	"CircleNumberDoubleBytePlain",
+	"CircleNumberWideDoubleByteWhitePlain",
+	"CircleNumberWideDoubleByteBlackPlain",
+	"TraditionalChinesePlain",
+	"TraditionalChinesePeriod",
+	"ArabicAlphabetDash",
+	"ArabicAbjadDash",
+	"HebrewAlphabetDash",
+	"KanjiKoreanPlain",
+	"KanjiKoreanPeriod",
+	"ArabicDoubleBytePlain",
+	"ArabicDoubleBytePeriod",
+	"ThaiAlphabetPeriod",
+	"ThaiAlphabetParenthesisRight",
+	"ThaiAlphabetParenthesesBoth",
+	"ThaiNumeralPeriod",
+	"ThaiNumeralParenthesisRight",
+	"ThaiNumeralParenthesesBoth",
+	"HindiAlphabetPeriod",
+	"HindiNumeralPeriod",
+	"KanjiSimplifiedChineseDoubleBytePeriod",
+	"HindiNumeralParenthesisRight",
+	"HindiAlphabet1Period",
+];
+
+// Live Office.js (observed on Mac desktop, PowerPointApi 1.10) returns some
+// enum-typed read properties (paragraphFormat.horizontalAlignment,
+// bulletFormat.type, bulletFormat.style) as the 0-based index of the enum
+// member's declaration order in @types/office-js — e.g. "2" for
+// BulletType.numbered — instead of the named string ("Numbered") the type
+// declarations promise. Map the numeric-string form back to its name; pass
+// through anything already named, empty, or out of range unchanged.
+function normalizeEnumString(val: string, names: string[]): string {
+	if (/^\d+$/.test(val)) {
+		const index = Number(val);
+		if (index >= 0 && index < names.length) return names[index];
+	}
+	return val;
+}
+
 /**
  * Splits shape text into paragraphs on `\r` (paragraph boundary; `\n` is a
  * soft line break within a paragraph). `length` excludes the trailing `\r`.
@@ -284,10 +359,19 @@ function extractRangeProperties(range: any): RangeProperties {
 			superscript: !!range.font.superscript,
 		},
 		paragraphFormat: {
-			horizontalAlignment: safeStr(range.paragraphFormat.horizontalAlignment),
+			horizontalAlignment: normalizeEnumString(
+				safeStr(range.paragraphFormat.horizontalAlignment),
+				PARAGRAPH_ALIGNMENT_NAMES,
+			),
 			indentLevel: safeNum(range.paragraphFormat.indentLevel),
-			bulletType: safeStr(range.paragraphFormat.bulletFormat.type),
-			bulletStyle: safeStr(range.paragraphFormat.bulletFormat.style),
+			bulletType: normalizeEnumString(
+				safeStr(range.paragraphFormat.bulletFormat.type),
+				BULLET_TYPE_NAMES,
+			),
+			bulletStyle: normalizeEnumString(
+				safeStr(range.paragraphFormat.bulletFormat.style),
+				BULLET_STYLE_NAMES,
+			),
 			bulletVisible: !!range.paragraphFormat.bulletFormat.visible,
 		},
 	};
@@ -838,6 +922,71 @@ async function handleGetShapeParagraphs(args: unknown): Promise<unknown> {
 			paragraphs,
 		};
 	});
+}
+
+/**
+ * Renders paragraphs as an indented markdown-like list, one marker per
+ * paragraph, indented by its effective indentLevel (a paragraph's own
+ * override if present in propertyGroups, else the shape's defaultProperties
+ * value). Numbered paragraphs (bulletType "Numbered") get "1.", "2." markers
+ * that count contiguous numbered paragraphs at the same indent level —
+ * interrupted by a shallower paragraph or a non-numbered paragraph at the
+ * same level, both of which restart the count at 1. Non-numbered paragraphs
+ * get bulletChar. Pure and standalone so a future markdown->paragraphs parser
+ * (for a "set text from markdown" tool) can sit next to it and reuse the
+ * same indent-unit/marker conventions.
+ */
+export function paragraphsToMarkdown(
+	paragraphs: { text: string; groupId: number }[],
+	propertyGroups: { groupId: number; properties: Record<string, any> }[],
+	defaultProperties: RangeProperties,
+	options: { bulletChar?: string } = {},
+): string {
+	const bulletChar = options.bulletChar ?? "-";
+	const diffByGroupId = new Map(propertyGroups.map((g) => [g.groupId, g.properties]));
+
+	// Running per-indent-level numbering state, indexed by level. Truncated
+	// whenever a shallower paragraph is seen, so a deeper list always
+	// restarts at 1 the next time that level is reused.
+	const levelState: { count: number; wasNumbered: boolean }[] = [];
+
+	return paragraphs
+		.map((p) => {
+			const diff = diffByGroupId.get(p.groupId) ?? {};
+			const defaultPf = defaultProperties.paragraphFormat as { indentLevel?: number; bulletType?: string };
+			const indentLevel = safeNum(diff.paragraphFormat?.indentLevel, defaultPf.indentLevel);
+			const bulletType = safeStr(diff.paragraphFormat?.bulletType, defaultPf.bulletType);
+			const isNumbered = bulletType === "Numbered";
+
+			levelState.length = Math.min(levelState.length, indentLevel + 1);
+			const prev = levelState[indentLevel];
+			const count = isNumbered && prev?.wasNumbered ? prev.count + 1 : 1;
+			levelState[indentLevel] = { count, wasNumbered: isNumbered };
+
+			const marker = isNumbered ? `${count}.` : bulletChar;
+			return "  ".repeat(indentLevel) + marker + " " + p.text;
+		})
+		.join("\n");
+}
+
+async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
+	const config = args as { slideIndex?: number; shapeId?: string; bulletChar?: string };
+	const slideIndex = config.slideIndex ?? 0;
+	const shapeId = config.shapeId ?? "";
+	const bulletChar = config.bulletChar ?? "-";
+
+	if (bulletChar !== "-" && bulletChar !== "*") {
+		return { error: `bulletChar must be '-' or '*', got '${bulletChar}'` };
+	}
+
+	const result = (await handleGetShapeParagraphs({ slideIndex, shapeId })) as any;
+	if (result.error) return result;
+
+	const markdown = paragraphsToMarkdown(result.paragraphs, result.propertyGroups, result.defaultProperties, {
+		bulletChar,
+	});
+
+	return { slideIndex, shapeId, markdown };
 }
 
 async function handleGetSelection(_args: unknown): Promise<unknown> {

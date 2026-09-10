@@ -217,6 +217,23 @@ public static class McpToolEngine
         },
         new
         {
+            name = "powerpoint_get_shape_text_markdown",
+            description = "Renders a shape's text as a markdown-like indented list — one bullet/number per paragraph, indented by its indentLevel. Paragraphs with bulletType 'Numbered' render as '1.'/'2.' markers that count contiguously within each indent level (restarting at 1 whenever interrupted by a shallower paragraph or a non-numbered paragraph at the same level); all others render with bulletChar. Read-only — use powerpoint_get_shape_paragraphs for structured per-paragraph data instead.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["shapeId"] = new { type = "string", description = "Shape ID or name" },
+                    ["bulletChar"] = new { type = "string", description = "Marker for non-numbered paragraphs: '-' or '*'. Default: '-'." }
+                },
+                required = new[] { "instanceId", "slideIndex", "shapeId" }
+            }
+        },
+        new
+        {
             name = "powerpoint_get_selection",
             description = "Returns what the user currently has selected in PowerPoint: selected text (with formatting and parent shape), selected shapes (with IDs and properties), or empty selection. Use this to understand user intent context.",
             inputSchema = new
@@ -1081,6 +1098,7 @@ public static class McpToolEngine
         "powerpoint_get_shape_image",
         "powerpoint_get_table",
         "powerpoint_get_shape_paragraphs",
+        "powerpoint_get_shape_text_markdown",
         "powerpoint_get_selection",
         "powerpoint_get_speaker_notes",
         "powerpoint_update_shape_text",
@@ -1314,6 +1332,14 @@ public static class McpToolEngine
         {
             var unknownParamError = ValidateKnownParameters(args.Value, name,
                 "instanceId", "slideIndex", "shapeId");
+            if (unknownParamError != null)
+                return unknownParamError;
+        }
+
+        if (name == "powerpoint_get_shape_text_markdown" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "shapeId", "bulletChar");
             if (unknownParamError != null)
                 return unknownParamError;
         }

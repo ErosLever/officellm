@@ -458,6 +458,140 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		)) as any;
 		expect(result.error).toContain("does not support text");
 	});
+
+	it("normalizes live Office.js's numeric-string enum encoding back to named values", async () => {
+		// Observed on live Office.js (Mac desktop, PowerPointApi 1.10):
+		// horizontalAlignment/bulletFormat.type/bulletFormat.style come back as
+		// the 0-based index into the enum's declaration order (e.g. "2" for
+		// BulletType.numbered) instead of the named string the @types/office-js
+		// declarations promise. Simulate that raw encoding via fixture input.
+		mock = new PowerPointMock({
+			slides: [
+				{
+					id: "slide_0",
+					shapes: [
+						{
+							id: "sE",
+							name: "Enum Encoding",
+							type: "TextBox",
+							text: "Only",
+							paragraphFormat: {
+								horizontalAlignment: "0",
+								bulletType: "2",
+								bulletStyle: "4",
+							},
+						},
+					],
+					notes: "",
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-gp9",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "sE" },
+		)) as any;
+
+		expect(result.defaultProperties.paragraphFormat).toMatchObject({
+			horizontalAlignment: "Left",
+			bulletType: "Numbered",
+			bulletStyle: "ArabicNumeralPeriod",
+		});
+	});
+});
+
+describe("powerpoint_get_shape_text_markdown", () => {
+	it("renders each paragraph as a '- ' bullet indented by its indentLevel", async () => {
+		const result = (await processCommand(
+			"cmd-md1",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+
+		expect(result.markdown).toBe(
+			["- Alpha", "    - Beta", "- Gamma", "- Delta", "- Epsilon"].join("\n"),
+		);
+	});
+
+	it("uses '*' when bulletChar is '*'", async () => {
+		const result = (await processCommand(
+			"cmd-md2",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "s7", bulletChar: "*" },
+		)) as any;
+
+		expect(result.markdown.split("\n")[0]).toBe("* Alpha");
+	});
+
+	it("rejects a bulletChar other than '-' or '*'", async () => {
+		const result = (await processCommand(
+			"cmd-md3",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "s7", bulletChar: "+" },
+		)) as any;
+
+		expect(result.error).toContain("bulletChar");
+	});
+
+	it("numbers contiguous 'Numbered' paragraphs within an indent level, restarting after an interruption", async () => {
+		mock = new PowerPointMock({
+			slides: [
+				{
+					id: "slide_0",
+					shapes: [
+						{
+							id: "sN",
+							name: "Numbered List",
+							type: "TextBox",
+							text: "One\rTwo\rNested\rThree\rFour",
+							paragraphFormat: { indentLevel: 0, bulletType: "Numbered" },
+							paragraphs: [
+								undefined,
+								undefined,
+								{ paragraphFormat: { indentLevel: 1, bulletType: "Numbered" } },
+								{ paragraphFormat: { bulletType: "None" } },
+								undefined,
+							] as any,
+						},
+					],
+					notes: "",
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-md4",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "sN" },
+		)) as any;
+
+		expect(result.markdown).toBe(
+			["1. One", "2. Two", "  1. Nested", "- Three", "1. Four"].join("\n"),
+		);
+	});
+
+	it("returns error for missing shape", async () => {
+		const result = (await processCommand(
+			"cmd-md5",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "nope" },
+		)) as any;
+		expect(result.error).toContain("not found");
+	});
+
+	it("returns error for shape with no text frame", async () => {
+		const result = (await processCommand(
+			"cmd-md6",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "s3" },
+		)) as any;
+		expect(result.error).toContain("does not support text");
+	});
 });
 
 describe("powerpoint_get_selection", () => {
