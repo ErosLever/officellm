@@ -11,12 +11,12 @@ public class McpToolEngineTests
 	}
 
     [Fact]
-    public void GetToolDefinitions_Returns136Tools()
+    public void GetToolDefinitions_Returns137Tools()
     {
         var tools = McpToolEngine.GetToolDefinitions();
 
         Assert.NotNull(tools);
-        Assert.Equal(136, tools.Length);
+        Assert.Equal(137, tools.Length);
     }
 
     [Fact]
@@ -50,6 +50,7 @@ public class McpToolEngineTests
         Assert.Contains("powerpoint_update_text_range_properties", names);
         Assert.Contains("powerpoint_insert_paragraph", names);
         Assert.Contains("powerpoint_delete_paragraph", names);
+        Assert.Contains("powerpoint_set_shape_text_markdown", names);
         Assert.Contains("powerpoint_update_speaker_notes", names);
 
         // Shape CRUD

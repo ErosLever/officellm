@@ -29,7 +29,12 @@ vi.mock("./communication", () => ({
 }));
 
 // Import AFTER vi.mock (vitest hoists the mock above this)
-import { processCommand } from "./powerpoint-commands";
+import {
+	processCommand,
+	toAlphabetCounter,
+	toRomanNumeral,
+	markdownToParagraphSpecs,
+} from "./powerpoint-commands";
 
 // ── Test data ───────────────────────────────────────────────────
 
@@ -153,6 +158,25 @@ beforeEach(() => {
 });
 
 // Need to re-import after mock — but vitest hoists vi.mock automatically
+
+const BULLET_STYLE_MARKDOWN_CASES: { style: string; markers: string[] }[] = [
+	{ style: "ArabicNumeralPlain", markers: ["1", "2", "3"] },
+	{ style: "ArabicNumeralPeriod", markers: ["1.", "2.", "3."] },
+	{ style: "ArabicNumeralParenthesisRight", markers: ["1)", "2)", "3)"] },
+	{ style: "ArabicNumeralParenthesesBoth", markers: ["(1)", "(2)", "(3)"] },
+	{ style: "AlphabetLowercasePeriod", markers: ["a.", "b.", "c."] },
+	{ style: "AlphabetLowercaseParenthesisRight", markers: ["a)", "b)", "c)"] },
+	{ style: "AlphabetLowercaseParenthesesBoth", markers: ["(a)", "(b)", "(c)"] },
+	{ style: "AlphabetUppercasePeriod", markers: ["A.", "B.", "C."] },
+	{ style: "AlphabetUppercaseParenthesisRight", markers: ["A)", "B)", "C)"] },
+	{ style: "AlphabetUppercaseParenthesesBoth", markers: ["(A)", "(B)", "(C)"] },
+	{ style: "RomanLowercasePeriod", markers: ["i.", "ii.", "iii."] },
+	{ style: "RomanLowercaseParenthesisRight", markers: ["i)", "ii)", "iii)"] },
+	{ style: "RomanLowercaseParenthesesBoth", markers: ["(i)", "(ii)", "(iii)"] },
+	{ style: "RomanUppercasePeriod", markers: ["I.", "II.", "III."] },
+	{ style: "RomanUppercaseParenthesisRight", markers: ["I)", "II)", "III)"] },
+	{ style: "RomanUppercaseParenthesesBoth", markers: ["(I)", "(II)", "(III)"] },
+];
 
 // ── READ TOOLS ───────────────────────────────────────────────────
 
@@ -591,6 +615,131 @@ describe("powerpoint_get_shape_text_markdown", () => {
 			{ slideIndex: 0, shapeId: "s3" },
 		)) as any;
 		expect(result.error).toContain("does not support text");
+	});
+
+	it.each(BULLET_STYLE_MARKDOWN_CASES)(
+		"renders $style with its real bullet markers",
+		async ({ style, markers }) => {
+			mock = new PowerPointMock({
+				slides: [
+					{
+						id: "slide_0",
+						shapes: [
+							{
+								id: "sStyled",
+								name: "Styled List",
+								type: "TextBox",
+								text: "One\rTwo\rThree",
+								paragraphFormat: { indentLevel: 0, bulletType: "Numbered", bulletStyle: style },
+							},
+						],
+						notes: "",
+					},
+				],
+			});
+			mock.install();
+			mockBridge.reportResult = mock.mockReportResult;
+
+			const result = (await processCommand(
+				"cmd-md-style",
+				"powerpoint_get_shape_text_markdown",
+				{ slideIndex: 0, shapeId: "sStyled" },
+			)) as any;
+
+			expect(result.markdown).toBe(
+				[`${markers[0]} One`, `${markers[1]} Two`, `${markers[2]} Three`].join("\n"),
+			);
+		},
+	);
+
+	it("restarts the count when bulletStyle changes at the same indent level", async () => {
+		mock = new PowerPointMock({
+			slides: [
+				{
+					id: "slide_0",
+					shapes: [
+						{
+							id: "sSwitch",
+							name: "Switching List",
+							type: "TextBox",
+							text: "One\rTwo\rThree",
+							paragraphFormat: {
+								indentLevel: 0,
+								bulletType: "Numbered",
+								bulletStyle: "AlphabetLowercasePeriod",
+							},
+							paragraphs: [
+								undefined,
+								undefined,
+								{ paragraphFormat: { bulletStyle: "RomanLowercasePeriod" } },
+							] as any,
+						},
+					],
+					notes: "",
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-md-switch",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "sSwitch" },
+		)) as any;
+
+		expect(result.markdown).toBe(["a. One", "b. Two", "i. Three"].join("\n"));
+	});
+
+	it("falls back to '1.'/'2.' for an out-of-scope bulletStyle", async () => {
+		mock = new PowerPointMock({
+			slides: [
+				{
+					id: "slide_0",
+					shapes: [
+						{
+							id: "sUnsupported",
+							name: "Unsupported Style List",
+							type: "TextBox",
+							text: "One\rTwo",
+							paragraphFormat: {
+								indentLevel: 0,
+								bulletType: "Numbered",
+								bulletStyle: "CircleNumberDoubleBytePlain",
+							},
+						},
+					],
+					notes: "",
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-md-fallback",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "sUnsupported" },
+		)) as any;
+
+		expect(result.markdown).toBe(["1. One", "2. Two"].join("\n"));
+	});
+});
+
+describe("bullet marker helper functions", () => {
+	it("toAlphabetCounter wraps past 26 (z -> aa -> ab)", () => {
+		expect(toAlphabetCounter(1, false)).toBe("a");
+		expect(toAlphabetCounter(26, false)).toBe("z");
+		expect(toAlphabetCounter(27, false)).toBe("aa");
+		expect(toAlphabetCounter(28, false)).toBe("ab");
+		expect(toAlphabetCounter(27, true)).toBe("AA");
+	});
+
+	it("toRomanNumeral spot checks (4, 9, 19)", () => {
+		expect(toRomanNumeral(4, false)).toBe("iv");
+		expect(toRomanNumeral(9, false)).toBe("ix");
+		expect(toRomanNumeral(19, false)).toBe("xix");
+		expect(toRomanNumeral(19, true)).toBe("XIX");
 	});
 });
 
@@ -1267,6 +1416,210 @@ describe("powerpoint_delete_paragraph", () => {
 		})) as any;
 
 		expect(result.error).toContain("not found");
+	});
+});
+
+describe("powerpoint_set_shape_text_markdown", () => {
+	it.each(BULLET_STYLE_MARKDOWN_CASES)(
+		"round-trips $style through set then get",
+		async ({ markers }) => {
+			const markdown = [`${markers[0]} One`, `${markers[1]} Two`, `${markers[2]} Three`].join(
+				"\n",
+			);
+
+			const setResult = (await processCommand(
+				"cmd-smd-set",
+				"powerpoint_set_shape_text_markdown",
+				{ slideIndex: 0, shapeId: "s7", markdown },
+			)) as any;
+			expect(setResult.paragraphCount).toBe(3);
+
+			const getResult = (await processCommand(
+				"cmd-smd-get",
+				"powerpoint_get_shape_text_markdown",
+				{ slideIndex: 0, shapeId: "s7" },
+			)) as any;
+			expect(getResult.markdown).toBe(markdown);
+		},
+	);
+
+	it("sets Unnumbered bullets for '-' and '*' markers", async () => {
+		const markdown = ["- One", "* Two"].join("\n");
+
+		await processCommand("cmd-smd-un-set", "powerpoint_set_shape_text_markdown", {
+			slideIndex: 0,
+			shapeId: "s7",
+			markdown,
+		});
+
+		const getResult = (await processCommand(
+			"cmd-smd-un-get",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		expect(getResult.markdown).toBe(["- One", "- Two"].join("\n"));
+	});
+
+	it("sets indentLevel from 2-space nesting", async () => {
+		const markdown = ["1. One", "  a. Two", "    i. Three", "    ii. Four"].join("\n");
+
+		await processCommand("cmd-smd-indent-set", "powerpoint_set_shape_text_markdown", {
+			slideIndex: 0,
+			shapeId: "s7",
+			markdown,
+		});
+
+		const getResult = (await processCommand(
+			"cmd-smd-indent-get",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		expect(getResult.markdown).toBe(markdown);
+	});
+
+	it("returns error for missing shape, without mutating", async () => {
+		const result = (await processCommand("cmd-smd-nf", "powerpoint_set_shape_text_markdown", {
+			slideIndex: 0,
+			shapeId: "nope",
+			markdown: "1. One",
+		})) as any;
+
+		expect(result.error).toContain("not found");
+	});
+
+	it("returns error for shape with no text frame", async () => {
+		const result = (await processCommand("cmd-smd-notf", "powerpoint_set_shape_text_markdown", {
+			slideIndex: 0,
+			shapeId: "s3", // s3 is an Image
+			markdown: "1. One",
+		})) as any;
+
+		expect(result.error).toContain("does not support text");
+	});
+});
+
+describe("markdownToParagraphSpecs", () => {
+	it("resolves 'i'/'I' as Roman when starting a fresh numbered run", () => {
+		const result = markdownToParagraphSpecs(["i. One", "ii. Two"].join("\n")) as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0].bulletStyle).toBe("RomanLowercasePeriod");
+		expect(result[1].bulletStyle).toBe("RomanLowercasePeriod");
+	});
+
+	it("resolves 'i'/'I' as alphabetic immediately after 'h'/'H' in the same run", () => {
+		const result = markdownToParagraphSpecs(
+			["f. One", "g. Two", "h. Three", "i. Four"].join("\n"),
+		) as any;
+		expect(result.error).toBeUndefined();
+		expect(result.map((s: any) => s.bulletStyle)).toEqual([
+			"AlphabetLowercasePeriod",
+			"AlphabetLowercasePeriod",
+			"AlphabetLowercasePeriod",
+			"AlphabetLowercasePeriod",
+		]);
+	});
+
+	it("resolves 'i' as Roman again when the alphabet run is severed by a bullet", () => {
+		const result = markdownToParagraphSpecs(
+			["h. One", "- Two", "i. Three", "ii. Four"].join("\n"),
+		) as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0].bulletStyle).toBe("AlphabetLowercasePeriod");
+		expect(result[1].bulletType).toBe("Unnumbered");
+		expect(result[2].bulletStyle).toBe("RomanLowercasePeriod");
+	});
+
+	it("treats 'v'/'x' as always Roman even right after an alphabetic run", () => {
+		const result = markdownToParagraphSpecs(["u. One", "v. Two"].join("\n")) as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0].bulletStyle).toBe("AlphabetLowercasePeriod");
+		expect(result[1].bulletStyle).toBe("RomanLowercasePeriod");
+	});
+
+	it("treats 'l'/'c'/'d'/'m' as always alphabetic even right after a Roman run", () => {
+		const result = markdownToParagraphSpecs(["x. One", "l. Two"].join("\n")) as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0].bulletStyle).toBe("RomanLowercasePeriod");
+		expect(result[1].bulletStyle).toBe("AlphabetLowercasePeriod");
+	});
+
+	it("classifies multi-letter Roman markers unambiguously regardless of context", () => {
+		const result = markdownToParagraphSpecs(
+			["i. One", "ii. Two", "iii. Three", "iv. Four"].join("\n"),
+		) as any;
+		expect(result.error).toBeUndefined();
+		expect(result.map((s: any) => s.bulletStyle)).toEqual([
+			"RomanLowercasePeriod",
+			"RomanLowercasePeriod",
+			"RomanLowercasePeriod",
+			"RomanLowercasePeriod",
+		]);
+	});
+
+	it("falls back to plain text for an unrecognized marker (bare multi-letter, no wrapper)", () => {
+		const result = markdownToParagraphSpecs("abc One") as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0]).toMatchObject({ text: "abc One", indentLevel: 0, bulletType: "None" });
+	});
+
+	it("falls back to plain text for a mixed-case multi-letter Roman token", () => {
+		const result = markdownToParagraphSpecs("iV. One") as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0]).toMatchObject({ text: "iV. One", indentLevel: 0, bulletType: "None" });
+	});
+
+	it("falls back to plain text for a line with no marker/space separator", () => {
+		const result = markdownToParagraphSpecs("NoMarkerHere") as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0]).toMatchObject({ text: "NoMarkerHere", indentLevel: 0, bulletType: "None" });
+	});
+
+	it("round-trips prose → list → prose", () => {
+		const result = markdownToParagraphSpecs(
+			["Intro paragraph.", "1. First item", "2. Second item", "Closing paragraph."].join("\n"),
+		) as any;
+		expect(result.error).toBeUndefined();
+		expect(result.map((s: any) => s.bulletType)).toEqual(["None", "Numbered", "Numbered", "None"]);
+		expect(result[0].text).toBe("Intro paragraph.");
+		expect(result[3].text).toBe("Closing paragraph.");
+	});
+
+	it("treats a standalone bare arabic '1' as a real marker with no corroboration needed", () => {
+		const result = markdownToParagraphSpecs("1. Solo item") as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0]).toMatchObject({ bulletType: "Numbered", bulletStyle: "ArabicNumeralPeriod" });
+	});
+
+	it("falls back to plain text for a standalone non-1 arabic marker", () => {
+		const result = markdownToParagraphSpecs("2. Solo item") as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0]).toMatchObject({ text: "2. Solo item", bulletType: "None" });
+	});
+
+	it("corroborates a two-line alpha run via mutual lookahead", () => {
+		const result = markdownToParagraphSpecs(["a. First", "b. Second"].join("\n")) as any;
+		expect(result.error).toBeUndefined();
+		expect(result.map((s: any) => s.bulletType)).toEqual(["Numbered", "Numbered"]);
+		expect(result[0].bulletStyle).toBe("AlphabetLowercasePeriod");
+		expect(result[1].bulletStyle).toBe("AlphabetLowercasePeriod");
+	});
+
+	it("falls back to plain text for an uncorroborated ambiguous single letter", () => {
+		const result = markdownToParagraphSpecs("i. do stuff") as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0]).toMatchObject({ text: "i. do stuff", bulletType: "None" });
+	});
+
+	it("errors on a malformed marker inside an established numbered run", () => {
+		const result = markdownToParagraphSpecs(["a. First", "b. Second", "zz. Oops"].join("\n")) as any;
+		expect(result.error).toContain("zz.");
+	});
+
+	it("corroborates via lookahead even when the next line uses a different marker style", () => {
+		const result = markdownToParagraphSpecs(["i. Something", "(a) Next"].join("\n")) as any;
+		expect(result.error).toBeUndefined();
+		expect(result[0].bulletType).toBe("Numbered");
+		expect(result[0].bulletStyle).toBe("RomanLowercasePeriod");
 	});
 });
 

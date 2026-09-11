@@ -74,6 +74,9 @@ export async function processCommand(
 			case "powerpoint_delete_paragraph":
 				result = await handleDeleteParagraph(args);
 				break;
+			case "powerpoint_set_shape_text_markdown":
+				result = await handleSetShapeTextMarkdown(args);
+				break;
 			case "powerpoint_update_speaker_notes":
 				result = await handleUpdateSpeakerNotes(args);
 				break;
@@ -280,6 +283,79 @@ const BULLET_STYLE_NAMES = [
 	"HindiAlphabet1Period",
 ];
 
+// The 16 Latin-representable BulletStyle values, mapped to a (family, wrapper)
+// pair — the single source of truth used by both paragraphsToMarkdown (encoder)
+// and markdownToParagraphSpecs (decoder) so they can't drift apart. The other
+// 25 styles (non-Latin scripts, circled-digit glyphs, Dash wrappers) have no
+// entry here and fall back to plain "${count}." rendering / are unreachable
+// from the decoder.
+export type BulletFamily = "arabic" | "alphaLower" | "alphaUpper" | "romanLower" | "romanUpper";
+export type BulletWrapper = "plain" | "period" | "parenRight" | "parenBoth";
+
+export const BULLET_STYLE_INFO: Record<string, { family: BulletFamily; wrapper: BulletWrapper }> = {
+	ArabicNumeralPlain: { family: "arabic", wrapper: "plain" },
+	ArabicNumeralPeriod: { family: "arabic", wrapper: "period" },
+	ArabicNumeralParenthesisRight: { family: "arabic", wrapper: "parenRight" },
+	ArabicNumeralParenthesesBoth: { family: "arabic", wrapper: "parenBoth" },
+	AlphabetLowercasePeriod: { family: "alphaLower", wrapper: "period" },
+	AlphabetLowercaseParenthesisRight: { family: "alphaLower", wrapper: "parenRight" },
+	AlphabetLowercaseParenthesesBoth: { family: "alphaLower", wrapper: "parenBoth" },
+	AlphabetUppercasePeriod: { family: "alphaUpper", wrapper: "period" },
+	AlphabetUppercaseParenthesisRight: { family: "alphaUpper", wrapper: "parenRight" },
+	AlphabetUppercaseParenthesesBoth: { family: "alphaUpper", wrapper: "parenBoth" },
+	RomanLowercasePeriod: { family: "romanLower", wrapper: "period" },
+	RomanLowercaseParenthesisRight: { family: "romanLower", wrapper: "parenRight" },
+	RomanLowercaseParenthesesBoth: { family: "romanLower", wrapper: "parenBoth" },
+	RomanUppercasePeriod: { family: "romanUpper", wrapper: "period" },
+	RomanUppercaseParenthesisRight: { family: "romanUpper", wrapper: "parenRight" },
+	RomanUppercaseParenthesesBoth: { family: "romanUpper", wrapper: "parenBoth" },
+};
+
+/** 1=a, 2=b, ..., 26=z, 27=aa, 28=ab, ... (bijective base-26, no zero digit). */
+export function toAlphabetCounter(n: number, uppercase: boolean): string {
+	let s = "";
+	let rem = n;
+	while (rem > 0) {
+		const digit = (rem - 1) % 26;
+		s = String.fromCharCode(97 + digit) + s;
+		rem = Math.floor((rem - 1) / 26);
+	}
+	return uppercase ? s.toUpperCase() : s;
+}
+
+/**
+ * Roman numeral using only i/v/x, range 1-19 — matches the decoder's
+ * supported marker range. l/c/d/m are never treated as Roman (see
+ * markdownToParagraphSpecs), so nothing above 19 needs to be representable.
+ */
+export function toRomanNumeral(n: number, uppercase: boolean): string {
+	const tens = Math.floor(n / 10);
+	const ones = n % 10;
+	const onesMap = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"];
+	const s = (tens > 0 ? "x" : "") + onesMap[ones];
+	return uppercase ? s.toUpperCase() : s;
+}
+
+// Family switch defaults to plain numeric ("arabic" and any unrecognized
+// family) rather than roman — roman is the more surprising silent fallback,
+// numeric is the safer "did nothing weird" behavior.
+export function formatBulletMarker(family: BulletFamily, wrapper: BulletWrapper, n: number): string {
+	const core =
+		family === "alphaLower"
+			? toAlphabetCounter(n, false)
+			: family === "alphaUpper"
+				? toAlphabetCounter(n, true)
+				: family === "romanLower"
+					? toRomanNumeral(n, false)
+					: family === "romanUpper"
+						? toRomanNumeral(n, true)
+						: String(n);
+	if (wrapper === "plain") return core;
+	if (wrapper === "period") return core + ".";
+	if (wrapper === "parenRight") return core + ")";
+	return "(" + core + ")";
+}
+
 // Live Office.js (observed on Mac desktop, PowerPointApi 1.10) returns some
 // enum-typed read properties (paragraphFormat.horizontalAlignment,
 // bulletFormat.type, bulletFormat.style) as the 0-based index of the enum
@@ -439,13 +515,34 @@ function hasAnyDefinedKey(
  * Applies font/paragraphFormat/bulletFormat overrides to a text range —
  * shared by every handler that restyles a `PowerPoint.TextRange` from a flat
  * config object (font/paragraphFormat/bulletFormat setter keys).
+ *
+ * `bulletFormat.visible` is written in its own sync, after `type`/`style`:
+ * live PowerPoint silently drops the whole bulletFormat write (reverting to
+ * Unnumbered) when `visible` is queued in the same batch as `type`/`style`
+ * before a single sync — confirmed via manual testing against a live
+ * document, not reproducible against the mock. Splitting the sync fixes it.
  */
-function applyRangeProperties(config: Record<string, unknown>, range: PowerPoint.TextRange): string[] {
-	return [
+async function applyRangeProperties(
+	config: Record<string, unknown>,
+	range: PowerPoint.TextRange,
+	ctx: PowerPoint.RequestContext,
+): Promise<string[]> {
+	const { bulletVisible, ...rest } = config;
+
+	const updated = [
 		...applyDefinedProperties(config, range.font, FONT_SETTERS),
 		...applyDefinedProperties(config, range.paragraphFormat, PARAGRAPH_FORMAT_SETTERS),
-		...applyDefinedProperties(config, range.paragraphFormat.bulletFormat, BULLET_FORMAT_SETTERS),
+		...applyDefinedProperties(rest, range.paragraphFormat.bulletFormat, BULLET_FORMAT_SETTERS),
 	];
+
+	if (bulletVisible !== undefined) {
+		await ctx.sync();
+		updated.push(
+			...applyDefinedProperties({ bulletVisible }, range.paragraphFormat.bulletFormat, BULLET_FORMAT_SETTERS),
+		);
+	}
+
+	return updated;
 }
 
 /**
@@ -947,23 +1044,31 @@ export function paragraphsToMarkdown(
 
 	// Running per-indent-level numbering state, indexed by level. Truncated
 	// whenever a shallower paragraph is seen, so a deeper list always
-	// restarts at 1 the next time that level is reused.
-	const levelState: { count: number; wasNumbered: boolean }[] = [];
+	// restarts at 1 the next time that level is reused. A bulletStyle change
+	// at the same level also restarts the count — same "restart on
+	// interruption" semantics already applied to indentLevel changes.
+	const levelState: { count: number; wasNumbered: boolean; style: string }[] = [];
 
 	return paragraphs
 		.map((p) => {
 			const diff = diffByGroupId.get(p.groupId) ?? {};
-			const defaultPf = defaultProperties.paragraphFormat as { indentLevel?: number; bulletType?: string };
+			const defaultPf = defaultProperties.paragraphFormat as {
+				indentLevel?: number;
+				bulletType?: string;
+				bulletStyle?: string;
+			};
 			const indentLevel = safeNum(diff.paragraphFormat?.indentLevel, defaultPf.indentLevel);
 			const bulletType = safeStr(diff.paragraphFormat?.bulletType, defaultPf.bulletType);
+			const bulletStyle = safeStr(diff.paragraphFormat?.bulletStyle, defaultPf.bulletStyle);
 			const isNumbered = bulletType === "Numbered";
 
 			levelState.length = Math.min(levelState.length, indentLevel + 1);
 			const prev = levelState[indentLevel];
-			const count = isNumbered && prev?.wasNumbered ? prev.count + 1 : 1;
-			levelState[indentLevel] = { count, wasNumbered: isNumbered };
+			const count = isNumbered && prev?.wasNumbered && prev.style === bulletStyle ? prev.count + 1 : 1;
+			levelState[indentLevel] = { count, wasNumbered: isNumbered, style: bulletStyle };
 
-			const marker = isNumbered ? `${count}.` : bulletChar;
+			const info = BULLET_STYLE_INFO[bulletStyle];
+			const marker = !isNumbered ? bulletChar : info ? formatBulletMarker(info.family, info.wrapper, count) : `${count}.`;
 			return "  ".repeat(indentLevel) + marker + " " + p.text;
 		})
 		.join("\n");
@@ -987,6 +1092,194 @@ async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
 	});
 
 	return { slideIndex, shapeId, markdown };
+}
+
+type LevelSlot = { family: BulletFamily; wrapper: BulletWrapper; lastCore: string };
+
+function findBulletStyleName(family: BulletFamily, wrapper: BulletWrapper): string | undefined {
+	return Object.keys(BULLET_STYLE_INFO).find(
+		(name) => BULLET_STYLE_INFO[name].family === family && BULLET_STYLE_INFO[name].wrapper === wrapper,
+	);
+}
+
+// Classifies an unwrapped marker core (the token with its period/parens
+// stripped) into a BulletFamily, given the previous numbered line's state at
+// the same indent level (only consulted to resolve the i/I ambiguity — see
+// markdownToParagraphSpecs). Returns undefined for anything unrecognized.
+function classifyMarkerCore(core: string, slot: LevelSlot | undefined): BulletFamily | undefined {
+	// Capped at 1-2 digits (1-99) — a realistic ceiling for a slide list,
+	// same spirit as capping Roman numerals at 1-19 below.
+	if (/^\d{1,2}$/.test(core)) return "arabic";
+
+	if (core.length === 1) {
+		if (!/^[a-zA-Z]$/.test(core)) return undefined;
+		const lower = core.toLowerCase();
+		const isLower = core === lower;
+		if (lower === "l" || lower === "c" || lower === "d" || lower === "m") {
+			return isLower ? "alphaLower" : "alphaUpper";
+		}
+		if (lower === "v" || lower === "x") {
+			return isLower ? "romanLower" : "romanUpper";
+		}
+		if (lower === "i") {
+			const continuesAlphabetRun =
+				!!slot &&
+				(slot.family === "alphaLower" || slot.family === "alphaUpper") &&
+				slot.lastCore === (isLower ? "h" : "H");
+			if (continuesAlphabetRun) return isLower ? "alphaLower" : "alphaUpper";
+			return isLower ? "romanLower" : "romanUpper";
+		}
+		return isLower ? "alphaLower" : "alphaUpper";
+	}
+
+	// Multi-character: only Roman numerals (1-19, i/v/x only) have a valid
+	// multi-letter marker in this scheme — no case mixing (no /i flag), so
+	// e.g. "iV" matches neither and falls through to the error below.
+	if (/^x?(ix|iv|v?i{0,3})$/.test(core)) return "romanLower";
+	if (/^X?(IX|IV|V?I{0,3})$/.test(core)) return "romanUpper";
+	return undefined;
+}
+
+type ParagraphSpec = {
+	text: string;
+	indentLevel: number;
+	bulletType: "None" | "Numbered" | "Unnumbered";
+	bulletStyle?: string;
+	bulletVisible?: true;
+};
+
+// Marker token capped at 7 chars — enough for the longest realistic marker,
+// "(xviii)" (parenBoth-wrapped Roman 18), with no wasted unbounded \S+.
+const MARKER_TOKEN_RE = /^(\S{1,7}) (.*)$/;
+// Explicit optional prefix "(" / suffix ")"/"." groups instead of four
+// separate wrapper alternatives — narrows directly to the four wrapper
+// shapes plus "plain", and rejects any other combo (e.g. an unclosed "(l" or
+// a nonsensical "(l.") as not marker-shaped.
+const WRAP_MATCH_RE = /^(\()?(\w{1,5})(\)|\.)?$/;
+
+function splitIndent(line: string): { indentLevel: number; rest: string } {
+	const match = line.match(/^((?:  )*)(.*)$/) as [string, string, string];
+	return { indentLevel: match[1].length / 2, rest: match[2] };
+}
+
+function wrapperOf(prefix: string | undefined, suffix: string | undefined): BulletWrapper | undefined {
+	if (prefix) return suffix === ")" ? "parenBoth" : undefined;
+	if (suffix === ")") return "parenRight";
+	if (suffix === ".") return "period";
+	if (!suffix) return "plain";
+	return undefined;
+}
+
+// Shape-only check for the lookahead corroboration: does this token merely
+// look like a marker (bullet char, or wrapper-shaped core), without
+// classifying its core into a real BulletFamily. Used only to decide whether
+// an ambiguous single-letter token on the *current* line should be trusted.
+function looksMarkerShaped(token: string): boolean {
+	if (token === "-" || token === "*") return true;
+	const wrapMatch = token.match(WRAP_MATCH_RE);
+	if (!wrapMatch) return false;
+	return wrapperOf(wrapMatch[1], wrapMatch[3]) !== undefined;
+}
+
+// Looks at the next non-blank line (regardless of its indent level) and
+// reports whether it also looks marker-shaped — corroborating evidence that
+// the current line's ambiguous token is really a list marker and not prose.
+function nextLineCorroborates(lines: string[], fromIndex: number): boolean {
+	for (let j = fromIndex; j < lines.length; j++) {
+		const { rest } = splitIndent(lines[j]);
+		if (rest === "") continue;
+		const tokenMatch = rest.match(MARKER_TOKEN_RE);
+		return !!tokenMatch && looksMarkerShaped(tokenMatch[1]);
+	}
+	return false;
+}
+
+/**
+ * Parses the markdown flavor produced by paragraphsToMarkdown back into
+ * per-paragraph specs (text/indentLevel/bulletType/bulletStyle/bulletVisible).
+ * Pure and standalone — the "set text from markdown" handler wraps this and
+ * applies the specs to a real shape.
+ *
+ * Lines that don't look like a real list marker (or whose marker-shaped
+ * token can't be corroborated as intentional — see below) fall back to
+ * plain prose paragraphs (`bulletType: "None"`) rather than erroring, so
+ * prose can be interleaved with list items. The only remaining hard error is
+ * a marker-shaped token that appears *inside* an already-established
+ * numbered run (same wrapper, same indent level) but doesn't fit the run's
+ * pattern — there, silently falling back to plain text would likely not be
+ * what the caller intended.
+ */
+export function markdownToParagraphSpecs(markdown: string): ParagraphSpec[] | { error: string } {
+	const lines = markdown.split("\n");
+	const specs: ParagraphSpec[] = [];
+
+	// Sequence-aware state, mirroring paragraphsToMarkdown's levelState, but
+	// only needs to remember enough to resolve i/I: per indent level, the
+	// family/wrapper/lastCore of the immediately preceding numbered line at
+	// that level, within the current contiguous numbered run.
+	const levelSlots: (LevelSlot | undefined)[] = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		const lineNo = i + 1;
+		const { indentLevel, rest } = splitIndent(lines[i]);
+		levelSlots.length = Math.min(levelSlots.length, indentLevel + 1);
+
+		const asPlain = () => {
+			levelSlots[indentLevel] = undefined;
+			specs.push({ text: rest, indentLevel, bulletType: "None" });
+		};
+
+		const tokenMatch = rest.match(MARKER_TOKEN_RE);
+		if (!tokenMatch) {
+			asPlain();
+			continue;
+		}
+		const [, token, text] = tokenMatch;
+
+		if (token === "-" || token === "*") {
+			levelSlots[indentLevel] = undefined;
+			specs.push({ text, indentLevel, bulletType: "Unnumbered", bulletVisible: true });
+			continue;
+		}
+
+		const wrapMatch = token.match(WRAP_MATCH_RE);
+		const wrapper = wrapMatch ? wrapperOf(wrapMatch[1], wrapMatch[3]) : undefined;
+		const core = wrapMatch?.[2];
+		const runSlot = levelSlots[indentLevel];
+		const insideMatchingRun = !!runSlot && runSlot.wrapper === wrapper;
+
+		if (!wrapper || core === undefined) {
+			// Not even marker-shaped — plain text, unless we're inside a
+			// run expecting this wrapper (can't happen here since wrapper
+			// is undefined, so this is always a safe plain fallback).
+			asPlain();
+			continue;
+		}
+
+		const family = classifyMarkerCore(core, runSlot);
+		const bulletStyle = family && findBulletStyleName(family, wrapper);
+		if (!family || !bulletStyle) {
+			if (insideMatchingRun) {
+				return {
+					error: `Marker '${token}' at line ${lineNo} continues a numbered list but does not match any supported bullet style.`,
+				};
+			}
+			asPlain();
+			continue;
+		}
+
+		const isExemptArabic = family === "arabic" && core === "1";
+		const corroborated = isExemptArabic || insideMatchingRun || nextLineCorroborates(lines, i + 1);
+		if (!corroborated) {
+			asPlain();
+			continue;
+		}
+
+		levelSlots[indentLevel] = { family, wrapper, lastCore: core };
+		specs.push({ text, indentLevel, bulletType: "Numbered", bulletStyle, bulletVisible: true });
+	}
+
+	return specs;
 }
 
 async function handleGetSelection(_args: unknown): Promise<unknown> {
@@ -1387,7 +1680,7 @@ async function handleUpdateTextRangeProperties(args: unknown): Promise<unknown> 
 			};
 		}
 
-		const updated = applyRangeProperties(config, range);
+		const updated = await applyRangeProperties(config, range, ctx);
 
 		await ctx.sync();
 
@@ -1489,7 +1782,7 @@ async function handleInsertParagraph(args: unknown): Promise<unknown> {
 			ctx.load(range, TEXT_RANGE_PROP_PATH);
 			await ctx.sync();
 
-			updated = applyRangeProperties(config, range);
+			updated = await applyRangeProperties(config, range, ctx);
 
 			await ctx.sync();
 		}
@@ -1561,6 +1854,61 @@ async function handleDeleteParagraph(args: unknown): Promise<unknown> {
 		await ctx.sync();
 
 		return { slideIndex, shapeId, paragraphStart, paragraphLength, deleted: true };
+	});
+}
+
+async function handleSetShapeTextMarkdown(args: unknown): Promise<unknown> {
+	const config = args as {
+		slideIndex?: number;
+		shapeId?: string;
+		markdown?: string;
+	};
+	const { slideIndex = 0, shapeId = "", markdown = "" } = config;
+
+	const specs = markdownToParagraphSpecs(markdown);
+	if ("error" in specs) return specs;
+
+	return runInPowerPoint(async (ctx) => {
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return resolved;
+		const { shape } = resolved;
+
+		const tf = shape.getTextFrameOrNullObject();
+		ctx.load(tf, "isNullObject");
+		await ctx.sync();
+
+		if (tf.isNullObject) {
+			return {
+				error: `Shape '${shapeId}' does not support text (type: image/table/etc)`,
+			};
+		}
+
+		const fullText = specs.map((s) => s.text).join("\r");
+		tf.textRange.text = fullText;
+		await ctx.sync();
+
+		const spans = splitParagraphs(fullText);
+
+		for (let i = 0; i < specs.length; i++) {
+			const spec = specs[i];
+			const span = spans[i];
+			const range = tf.textRange.getSubstring(span.start, span.length);
+			ctx.load(range, TEXT_RANGE_PROP_PATH);
+			await ctx.sync();
+
+			await applyRangeProperties(
+				{
+					indentLevel: spec.indentLevel,
+					bulletType: spec.bulletType,
+					bulletStyle: spec.bulletStyle,
+				},
+				range,
+				ctx,
+			);
+			await ctx.sync();
+		}
+
+		return { slideIndex, shapeId, paragraphCount: specs.length };
 	});
 }
 

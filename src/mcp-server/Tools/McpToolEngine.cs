@@ -421,6 +421,23 @@ public static class McpToolEngine
         },
         new
         {
+            name = "powerpoint_set_shape_text_markdown",
+            description = "Replaces a shape's entire text frame from a markdown-like indented list — the inverse of powerpoint_get_shape_text_markdown. Each line becomes one paragraph: leading 2-space groups set indentLevel, '-'/'*' markers become Unnumbered bullets, and numbered markers ('1.', 'a.', '(iv)', 'III)', etc.) are classified into the matching bulletType/bulletStyle. Supports the 16 Latin-representable bullet styles (Arabic numeral, alphabet lower/upper, roman lower/upper, each with plain/period/parenRight/parenBoth wrappers). Ambiguous single-letter markers are resolved sequence-aware: 'i'/'I' is alphabetic only immediately after 'h'/'H' in the same numbered run, otherwise roman; 'v'/'x' are always roman; 'l'/'c'/'d'/'m' are always alphabetic. Prose lines can be freely interleaved with list items — any line/marker that isn't confidently a list item (or can't be corroborated as one by the next non-blank line) falls back to a plain paragraph instead of erroring; the only hard error left is a malformed marker inside an already-established numbered run.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["shapeId"] = new { type = "string", description = "Shape ID or name" },
+                    ["markdown"] = new { type = "string", description = "REQUIRED. Markdown-like indented list, in the same flavor produced by powerpoint_get_shape_text_markdown." }
+                },
+                required = new[] { "instanceId", "slideIndex", "shapeId", "markdown" }
+            }
+        },
+        new
+        {
             name = "powerpoint_update_speaker_notes",
             description = "Sets speaker notes for a specific slide. Replaces any existing notes. Applies directly.",
             inputSchema = new
@@ -1106,6 +1123,7 @@ public static class McpToolEngine
         "powerpoint_update_text_range_properties",
         "powerpoint_insert_paragraph",
         "powerpoint_delete_paragraph",
+        "powerpoint_set_shape_text_markdown",
         "powerpoint_update_speaker_notes",
         "powerpoint_add_textbox",
         "powerpoint_add_image",
@@ -1365,6 +1383,14 @@ public static class McpToolEngine
                 "underline", "strikethrough", "doubleStrikethrough", "allCaps", "smallCaps", "subscript", "superscript",
                 "horizontalAlignment", "indentLevel",
                 "bulletType", "bulletStyle", "bulletVisible");
+            if (unknownParamError != null)
+                return unknownParamError;
+        }
+
+        if (name == "powerpoint_set_shape_text_markdown" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "instanceId", "slideIndex", "shapeId", "markdown");
             if (unknownParamError != null)
                 return unknownParamError;
         }
