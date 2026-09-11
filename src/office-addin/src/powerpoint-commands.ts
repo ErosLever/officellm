@@ -1021,6 +1021,135 @@ async function handleGetShapeParagraphs(args: unknown): Promise<unknown> {
 	});
 }
 
+export type InlineRun = {
+	start: number;
+	length: number;
+	bold: boolean;
+	italic: boolean;
+	strikethrough: boolean;
+};
+
+// Relative priority of each marker character in the fixed nesting order:
+// bold outermost, italic next, strikethrough innermost. Reading an opening
+// marker sequence left-to-right (e.g. "*_~") visits strictly increasing
+// priorities; the matching close is that sequence reversed ("~_*").
+const MARKER_PRIORITY: Record<string, number> = { "*": 0, "_": 1, "~": 2 };
+
+function escapeMarkers(s: string): string {
+	return s.replace(/[*_~]/g, (m) => "\\" + m);
+}
+
+function unescapeMarkers(s: string): string {
+	return s.replace(/\\([*_~])/g, "$1");
+}
+
+/**
+ * Inverse of `parseInlineMarkers`: wraps each run's slice of `text` in
+ * Slack-style markers (`*bold*`, `_italic_`, `~strike~`), nested in the
+ * fixed order bold > italic > strikethrough (e.g. bold+italic+strikethrough
+ * -> "*_~text~_*"), and backslash-escapes literal `*`/`_`/`~` everywhere
+ * else so they round-trip through `parseInlineMarkers` as plain characters.
+ * `runs` must be sorted by `start` and non-overlapping.
+ */
+export function wrapInlineMarkers(text: string, runs: InlineRun[]): string {
+	let out = "";
+	let cursor = 0;
+	for (const run of runs) {
+		out += escapeMarkers(text.slice(cursor, run.start));
+		let wrapped = escapeMarkers(text.slice(run.start, run.start + run.length));
+		if (run.strikethrough) wrapped = `~${wrapped}~`;
+		if (run.italic) wrapped = `_${wrapped}_`;
+		if (run.bold) wrapped = `*${wrapped}*`;
+		out += wrapped;
+		cursor = run.start + run.length;
+	}
+	out += escapeMarkers(text.slice(cursor));
+	return out;
+}
+
+// Finds the first occurrence of `marker` at or after `from` that isn't
+// preceded by a backslash escape.
+function findUnescapedMarker(text: string, from: number, marker: string): number {
+	let idx = text.indexOf(marker, from);
+	while (idx !== -1 && text[idx - 1] === "\\") {
+		idx = text.indexOf(marker, idx + 1);
+	}
+	return idx;
+}
+
+/**
+ * Inverse of `wrapInlineMarkers`: strips Slack-style inline markers
+ * (`*bold*`, `_italic_`, `~strike~`, nestable in the fixed bold > italic >
+ * strikethrough order) out of `text`, returning the plain unmarked text plus
+ * the runs those markers described (offsets relative to the returned text).
+ * Backslash-escaped marker characters (`\*`, `\_`, `\~`) are unescaped and
+ * never treated as delimiters. A marker sequence that doesn't follow the
+ * fixed nesting order, or has no matching close later in the string, is not
+ * an error — it's left as plain literal characters, mirroring this file's
+ * existing "don't hard-error on ambiguous input" posture.
+ */
+export function parseInlineMarkers(text: string): { text: string; runs: InlineRun[] } {
+	const runs: InlineRun[] = [];
+	let out = "";
+	let i = 0;
+
+	while (i < text.length) {
+		const ch = text[i];
+
+		if (ch === "\\" && i + 1 < text.length && "*_~".includes(text[i + 1])) {
+			out += text[i + 1];
+			i += 2;
+			continue;
+		}
+
+		if (ch !== "*" && ch !== "_" && ch !== "~") {
+			out += ch;
+			i += 1;
+			continue;
+		}
+
+		// Greedily capture the longest strictly-increasing-priority run of
+		// marker chars starting here (e.g. "*_~"), then try progressively
+		// shorter prefixes until one has a matching unescaped close later
+		// in the string.
+		let openEnd = i + 1;
+		while (
+			openEnd < text.length &&
+			"*_~".includes(text[openEnd]) &&
+			MARKER_PRIORITY[text[openEnd]] > MARKER_PRIORITY[text[openEnd - 1]]
+		) {
+			openEnd++;
+		}
+
+		let matched = false;
+		for (let len = openEnd - i; len >= 1 && !matched; len--) {
+			const open = text.slice(i, i + len);
+			const close = [...open].reverse().join("");
+			const closeIndex = findUnescapedMarker(text, i + len, close);
+			if (closeIndex === -1) continue;
+
+			const inner = unescapeMarkers(text.slice(i + len, closeIndex));
+			runs.push({
+				start: out.length,
+				length: inner.length,
+				bold: open.includes("*"),
+				italic: open.includes("_"),
+				strikethrough: open.includes("~"),
+			});
+			out += inner;
+			i = closeIndex + close.length;
+			matched = true;
+		}
+
+		if (!matched) {
+			out += ch;
+			i += 1;
+		}
+	}
+
+	return { text: out, runs };
+}
+
 /**
  * Renders paragraphs as an indented markdown-like list, one marker per
  * paragraph, indented by its effective indentLevel (a paragraph's own
@@ -1038,6 +1167,7 @@ export function paragraphsToMarkdown(
 	propertyGroups: { groupId: number; properties: Record<string, any> }[],
 	defaultProperties: RangeProperties,
 	options: { bulletChar?: string } = {},
+	wordRuns: InlineRun[][] = [],
 ): string {
 	const bulletChar = options.bulletChar ?? "-";
 	const diffByGroupId = new Map(propertyGroups.map((g) => [g.groupId, g.properties]));
@@ -1050,7 +1180,7 @@ export function paragraphsToMarkdown(
 	const levelState: { count: number; wasNumbered: boolean; style: string }[] = [];
 
 	return paragraphs
-		.map((p) => {
+		.map((p, index) => {
 			const diff = diffByGroupId.get(p.groupId) ?? {};
 			const defaultPf = defaultProperties.paragraphFormat as {
 				indentLevel?: number;
@@ -1069,9 +1199,62 @@ export function paragraphsToMarkdown(
 
 			const info = BULLET_STYLE_INFO[bulletStyle];
 			const marker = !isNumbered ? bulletChar : info ? formatBulletMarker(info.family, info.wrapper, count) : `${count}.`;
-			return "  ".repeat(indentLevel) + marker + " " + p.text;
+			const text = wrapInlineMarkers(p.text, wordRuns[index] ?? []);
+			return "  ".repeat(indentLevel) + marker + " " + text;
 		})
 		.join("\n");
+}
+
+/**
+ * Reads per-word bold/italic/strikethrough for every paragraph in `tf`'s text
+ * and merges adjacent words sharing identical flags into runs, for
+ * `paragraphsToMarkdown`'s `wordRuns` param. Batches every word's
+ * `getSubstring` load behind a single `ctx.sync()`, mirroring
+ * `handleGetShapeParagraphs`'s paragraph-level batching.
+ */
+async function loadWordRuns(
+	tf: PowerPoint.TextFrame,
+	paragraphSpans: { text: string; start: number; length: number }[],
+	ctx: PowerPoint.RequestContext,
+): Promise<InlineRun[][]> {
+	const wordSpansByParagraph = paragraphSpans.map((span) =>
+		[...span.text.matchAll(/\S+/g)].map((m) => ({ start: m.index as number, length: m[0].length })),
+	);
+
+	const wordRangesByParagraph = wordSpansByParagraph.map((wordSpans, pIndex) =>
+		wordSpans.map((word) => {
+			const range = tf.textRange.getSubstring(paragraphSpans[pIndex].start + word.start, word.length);
+			ctx.load(range, "font/bold,font/italic,font/strikethrough");
+			return range;
+		}),
+	);
+	await ctx.sync();
+
+	return wordSpansByParagraph.map((wordSpans, pIndex) => {
+		const runs: InlineRun[] = [];
+		let lastWordIndex = -1;
+		wordSpans.forEach((word, wIndex) => {
+			const range = wordRangesByParagraph[pIndex][wIndex];
+			const bold = !!range.font.bold;
+			const italic = !!range.font.italic;
+			const strikethrough = !!range.font.strikethrough;
+			const last = runs[runs.length - 1];
+			if (
+				last &&
+				lastWordIndex === wIndex - 1 &&
+				last.bold === bold &&
+				last.italic === italic &&
+				last.strikethrough === strikethrough
+			) {
+				last.length = word.start + word.length - last.start;
+				lastWordIndex = wIndex;
+			} else if (bold || italic || strikethrough) {
+				runs.push({ start: word.start, length: word.length, bold, italic, strikethrough });
+				lastWordIndex = wIndex;
+			}
+		});
+		return runs;
+	});
 }
 
 async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
@@ -1087,9 +1270,23 @@ async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
 	const result = (await handleGetShapeParagraphs({ slideIndex, shapeId })) as any;
 	if (result.error) return result;
 
-	const markdown = paragraphsToMarkdown(result.paragraphs, result.propertyGroups, result.defaultProperties, {
-		bulletChar,
+	const wordRuns = await runInPowerPoint(async (ctx) => {
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return [];
+		const tf = resolved.shape.getTextFrameOrNullObject();
+		ctx.load(tf, "isNullObject");
+		await ctx.sync();
+		if (tf.isNullObject) return [];
+		return loadWordRuns(tf, splitParagraphs(result.fullText), ctx);
 	});
+
+	const markdown = paragraphsToMarkdown(
+		result.paragraphs,
+		result.propertyGroups,
+		result.defaultProperties,
+		{ bulletChar },
+		wordRuns,
+	);
 
 	return { slideIndex, shapeId, markdown };
 }
@@ -1146,6 +1343,7 @@ type ParagraphSpec = {
 	bulletType: "None" | "Numbered" | "Unnumbered";
 	bulletStyle?: string;
 	bulletVisible?: true;
+	runs?: InlineRun[];
 };
 
 // Marker token capped at 7 chars — enough for the longest realistic marker,
@@ -1226,7 +1424,8 @@ export function markdownToParagraphSpecs(markdown: string): ParagraphSpec[] | { 
 
 		const asPlain = () => {
 			levelSlots[indentLevel] = undefined;
-			specs.push({ text: rest, indentLevel, bulletType: "None" });
+			const { text: cleanText, runs } = parseInlineMarkers(rest);
+			specs.push({ text: cleanText, indentLevel, bulletType: "None", runs });
 		};
 
 		const tokenMatch = rest.match(MARKER_TOKEN_RE);
@@ -1238,7 +1437,8 @@ export function markdownToParagraphSpecs(markdown: string): ParagraphSpec[] | { 
 
 		if (token === "-" || token === "*") {
 			levelSlots[indentLevel] = undefined;
-			specs.push({ text, indentLevel, bulletType: "Unnumbered", bulletVisible: true });
+			const { text: cleanText, runs } = parseInlineMarkers(text);
+			specs.push({ text: cleanText, indentLevel, bulletType: "Unnumbered", bulletVisible: true, runs });
 			continue;
 		}
 
@@ -1276,7 +1476,8 @@ export function markdownToParagraphSpecs(markdown: string): ParagraphSpec[] | { 
 		}
 
 		levelSlots[indentLevel] = { family, wrapper, lastCore: core };
-		specs.push({ text, indentLevel, bulletType: "Numbered", bulletStyle, bulletVisible: true });
+		const { text: cleanText, runs } = parseInlineMarkers(text);
+		specs.push({ text: cleanText, indentLevel, bulletType: "Numbered", bulletStyle, bulletVisible: true, runs });
 	}
 
 	return specs;
@@ -1906,6 +2107,23 @@ async function handleSetShapeTextMarkdown(args: unknown): Promise<unknown> {
 				ctx,
 			);
 			await ctx.sync();
+
+			for (const run of spec.runs ?? []) {
+				const wordRange = tf.textRange.getSubstring(span.start + run.start, run.length);
+				ctx.load(wordRange, TEXT_RANGE_PROP_PATH);
+				await ctx.sync();
+
+				await applyRangeProperties(
+					{
+						bold: run.bold || undefined,
+						italic: run.italic || undefined,
+						strikethrough: run.strikethrough || undefined,
+					},
+					wordRange,
+					ctx,
+				);
+				await ctx.sync();
+			}
 		}
 
 		return { slideIndex, shapeId, paragraphCount: specs.length };

@@ -54,6 +54,12 @@ export interface MockShapeData {
 	paragraphs?: Array<{
 		font?: MockShapeData["font"];
 		paragraphFormat?: MockShapeData["paragraphFormat"];
+		// Sub-paragraph font overrides, keyed by exact local [start, length)
+		// within this paragraph's text — independent of the paragraph-wide
+		// `font` bag above, so e.g. bolding one word doesn't clobber a
+		// separately-italicized word in the same paragraph. Populated by
+		// getSubstring() calls that don't span the whole paragraph.
+		runs?: Array<{ start: number; length: number; font?: MockShapeData["font"] }>;
 	}>;
 	textFrame?: {
 		marginTop?: number;
@@ -1073,7 +1079,10 @@ class MockTextRange {
 	 * the whole text needed.
 	 */
 	getSubstring(start: number, length: number): MockTextRange {
+		const parts = this._data.text.split("\r");
 		const index = this._data.text.slice(0, start).split("\r").length - 1;
+		const paragraphStart = parts.slice(0, index).reduce((sum, p) => sum + p.length + 1, 0);
+		const paragraphLength = parts[index].length;
 
 		if (!this._data.paragraphs) this._data.paragraphs = [];
 		if (!this._data.paragraphs[index]) this._data.paragraphs[index] = {};
@@ -1091,9 +1100,31 @@ class MockTextRange {
 			...paragraphData.paragraphFormat,
 		};
 
+		const isWholeParagraph = start === paragraphStart && length === paragraphLength;
+		if (isWholeParagraph) {
+			const styleData: TextFrameBackingData = {
+				text: "",
+				font: paragraphData.font,
+				paragraphFormat: paragraphData.paragraphFormat,
+			};
+			return new MockTextRange(this._ctx, this._data, styleData, start, length);
+		}
+
+		// Sub-paragraph range: track its own independent font bag, keyed by
+		// exact local [start, length), instead of sharing the whole
+		// paragraph's bag with every other sub-range.
+		const localStart = start - paragraphStart;
+		if (!paragraphData.runs) paragraphData.runs = [];
+		let runData = paragraphData.runs.find((r) => r.start === localStart && r.length === length);
+		if (!runData) {
+			runData = { start: localStart, length };
+			paragraphData.runs.push(runData);
+		}
+		runData.font = { ...paragraphData.font, ...runData.font };
+
 		const styleData: TextFrameBackingData = {
 			text: "",
-			font: paragraphData.font,
+			font: runData.font,
 			paragraphFormat: paragraphData.paragraphFormat,
 		};
 		return new MockTextRange(this._ctx, this._data, styleData, start, length);

@@ -34,6 +34,8 @@ import {
 	toAlphabetCounter,
 	toRomanNumeral,
 	markdownToParagraphSpecs,
+	wrapInlineMarkers,
+	parseInlineMarkers,
 } from "./powerpoint-commands";
 
 // ── Test data ───────────────────────────────────────────────────
@@ -723,6 +725,43 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		)) as any;
 
 		expect(result.markdown).toBe(["1. One", "2. Two"].join("\n"));
+	});
+
+	it("renders a bold run and a separate italic run in the same paragraph", async () => {
+		mock = new PowerPointMock({
+			slides: [
+				{
+					id: "slide_0",
+					shapes: [
+						{
+							id: "sInline",
+							name: "Inline Formatted",
+							type: "TextBox",
+							text: "say hello world now",
+							paragraphs: [
+								{
+									runs: [
+										{ start: 4, length: 5, font: { bold: true } },
+										{ start: 10, length: 5, font: { italic: true } },
+									],
+								},
+							] as any,
+						},
+					],
+					notes: "",
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-md-inline",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "sInline" },
+		)) as any;
+
+		expect(result.markdown).toBe("- say *hello* _world_ now");
 	});
 });
 
@@ -1477,6 +1516,23 @@ describe("powerpoint_set_shape_text_markdown", () => {
 		expect(getResult.markdown).toBe(markdown);
 	});
 
+	it("applies bold/italic runs to the right words and round-trips through get", async () => {
+		const markdown = "- say *hello* _world_ now";
+
+		await processCommand("cmd-smd-inline-set", "powerpoint_set_shape_text_markdown", {
+			slideIndex: 0,
+			shapeId: "s7",
+			markdown,
+		});
+
+		const getResult = (await processCommand(
+			"cmd-smd-inline-get",
+			"powerpoint_get_shape_text_markdown",
+			{ slideIndex: 0, shapeId: "s7" },
+		)) as any;
+		expect(getResult.markdown).toBe(markdown);
+	});
+
 	it("returns error for missing shape, without mutating", async () => {
 		const result = (await processCommand("cmd-smd-nf", "powerpoint_set_shape_text_markdown", {
 			slideIndex: 0,
@@ -1620,6 +1676,115 @@ describe("markdownToParagraphSpecs", () => {
 		expect(result.error).toBeUndefined();
 		expect(result[0].bulletType).toBe("Numbered");
 		expect(result[0].bulletStyle).toBe("RomanLowercasePeriod");
+	});
+});
+
+describe("wrapInlineMarkers", () => {
+	it("wraps a single bold word", () => {
+		expect(wrapInlineMarkers("hello world", [{ start: 0, length: 5, bold: true, italic: false, strikethrough: false }])).toBe(
+			"*hello* world",
+		);
+	});
+
+	it("wraps a merged multi-word bold run as one span", () => {
+		expect(
+			wrapInlineMarkers("say hello world now", [
+				{ start: 4, length: 11, bold: true, italic: false, strikethrough: false },
+			]),
+		).toBe("say *hello world* now");
+	});
+
+	it("nests bold+italic as *_text_*", () => {
+		expect(wrapInlineMarkers("hello", [{ start: 0, length: 5, bold: true, italic: true, strikethrough: false }])).toBe(
+			"*_hello_*",
+		);
+	});
+
+	it("nests bold+italic+strikethrough as *_~text~_*", () => {
+		expect(
+			wrapInlineMarkers("hello", [{ start: 0, length: 5, bold: true, italic: true, strikethrough: true }]),
+		).toBe("*_~hello~_*");
+	});
+
+	it("escapes literal marker characters in plain text", () => {
+		expect(wrapInlineMarkers("a*b_c~d", [])).toBe("a\\*b\\_c\\~d");
+	});
+
+	it("escapes literal marker characters inside a formatted run", () => {
+		expect(wrapInlineMarkers("a*b", [{ start: 0, length: 3, bold: true, italic: false, strikethrough: false }])).toBe(
+			"*a\\*b*",
+		);
+	});
+});
+
+describe("parseInlineMarkers", () => {
+	it("parses a single bold word", () => {
+		const result = parseInlineMarkers("*hello* world");
+		expect(result.text).toBe("hello world");
+		expect(result.runs).toEqual([{ start: 0, length: 5, bold: true, italic: false, strikethrough: false }]);
+	});
+
+	it("parses a merged bold run spanning multiple words", () => {
+		const result = parseInlineMarkers("say *hello world* now");
+		expect(result.text).toBe("say hello world now");
+		expect(result.runs).toEqual([{ start: 4, length: 11, bold: true, italic: false, strikethrough: false }]);
+	});
+
+	it("parses nested bold+italic", () => {
+		const result = parseInlineMarkers("*_hello_*");
+		expect(result.text).toBe("hello");
+		expect(result.runs).toEqual([{ start: 0, length: 5, bold: true, italic: true, strikethrough: false }]);
+	});
+
+	it("parses full triple nesting bold+italic+strikethrough", () => {
+		const result = parseInlineMarkers("*_~hello~_*");
+		expect(result.text).toBe("hello");
+		expect(result.runs).toEqual([{ start: 0, length: 5, bold: true, italic: true, strikethrough: true }]);
+	});
+
+	it("unescapes literal marker characters", () => {
+		const result = parseInlineMarkers("a\\*b\\_c\\~d");
+		expect(result.text).toBe("a*b_c~d");
+		expect(result.runs).toEqual([]);
+	});
+
+	it("parses a lone marker whose content contains a different marker char literally", () => {
+		// "_*text*_" opens with "_" (italic); "*" doesn't extend the open
+		// sequence since its priority isn't higher, so only "_" is tried as
+		// an opener. Its matching close is the trailing "_", and the "*"
+		// characters in between are literal (not re-scanned as bold markers).
+		const result = parseInlineMarkers("_*text*_");
+		expect(result.text).toBe("*text*");
+		expect(result.runs).toEqual([{ start: 0, length: 6, bold: false, italic: true, strikethrough: false }]);
+	});
+
+	it("treats an adjacent marker combo with no valid close as literal characters", () => {
+		const result = parseInlineMarkers("*_text~");
+		expect(result.text).toBe("*_text~");
+		expect(result.runs).toEqual([]);
+	});
+
+	it("treats an unclosed marker as a literal character", () => {
+		const result = parseInlineMarkers("*no close here");
+		expect(result.text).toBe("*no close here");
+		expect(result.runs).toEqual([]);
+	});
+
+	it("round-trips through wrapInlineMarkers", () => {
+		const text = "say hello world now";
+		const runs = [{ start: 4, length: 11, bold: true, italic: true, strikethrough: false }];
+		const wrapped = wrapInlineMarkers(text, runs);
+		const parsed = parseInlineMarkers(wrapped);
+		expect(parsed.text).toBe(text);
+		expect(parsed.runs).toEqual(runs);
+	});
+
+	it("round-trips escaped literals through wrapInlineMarkers", () => {
+		const text = "a*b_c~d plain";
+		const wrapped = wrapInlineMarkers(text, []);
+		const parsed = parseInlineMarkers(wrapped);
+		expect(parsed.text).toBe(text);
+		expect(parsed.runs).toEqual([]);
 	});
 });
 
