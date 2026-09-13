@@ -21,6 +21,9 @@ export interface MockShapeData {
 	id: string;
 	name: string;
 	type?: string;
+	// Placeholder type (e.g. "Title", "Body") backing shape.placeholderFormat.type.
+	// Undefined/empty means the shape isn't a placeholder.
+	placeholderType?: string;
 	left?: number;
 	top?: number;
 	width?: number;
@@ -85,6 +88,7 @@ export interface MockSlideData {
 export interface MockLayoutData {
 	id: string;
 	name: string;
+	shapes?: MockShapeData[];
 }
 
 export interface MockSlideMasterData {
@@ -96,6 +100,8 @@ export interface MockSlideMasterData {
 export interface MockPresentationData {
 	slides: MockSlideData[];
 	slideMasters?: MockSlideMasterData[];
+	slideWidth?: number;
+	slideHeight?: number;
 }
 
 const DEFAULT_SLIDE_MASTERS: MockSlideMasterData[] = [
@@ -229,12 +235,19 @@ class MockContext {
 	}
 
 	async sync() {
-		for (const a of this._pendingActions) a();
+		const actions = this._pendingActions;
 		this._pendingActions = [];
-		for (const l of this._loads) {
+		for (const a of actions) a();
+
+		// Queues are cleared BEFORE running _populate — a mock that throws
+		// (e.g. MockPlaceholderFormat on a non-placeholder shape, mirroring
+		// real PowerPoint's GeneralException) must not leave stale loads
+		// behind for the next sync() call once the exception is caught.
+		const loads = this._loads;
+		this._loads = [];
+		for (const l of loads) {
 			if (l.target._populate) l.target._populate(l.props);
 		}
-		this._loads = [];
 	}
 }
 
@@ -244,11 +257,13 @@ class MockPresentation {
 	private _ctx: MockContext;
 	slides: MockSlideCollection;
 	slideMasters: MockSlideMasterCollection;
+	pageSetup: MockPageSetup;
 
 	constructor(ctx: MockContext, data: MockPresentationData) {
 		this._ctx = ctx;
 		this.slides = new MockSlideCollection(ctx, data.slides);
 		this.slideMasters = new MockSlideMasterCollection(ctx, data.slideMasters ?? []);
+		this.pageSetup = new MockPageSetup(ctx, data);
 	}
 
 	load(prop: string) {
@@ -460,6 +475,7 @@ class MockAppliedLayout {
 	private _loaded = new Set<string>();
 	private _id = "";
 	private _name = "";
+	private _shapesCollection: MockShapeCollection | null = null;
 
 	constructor(ctx: MockContext, slideData: MockSlideData) {
 		this._ctx = ctx;
@@ -473,6 +489,74 @@ class MockAppliedLayout {
 		return this._name;
 	}
 
+	// Backed directly by the current layoutId rather than the deferred
+	// load/_populate pair used for id/name, since a layout's own shapes
+	// (e.g. its title placeholder's inherited font size) are read
+	// synchronously off this getter — mirrors real PowerPoint, where
+	// `slide.layout.shapes` doesn't require loading `layout.id` first.
+	get shapes(): MockShapeCollection {
+		if (!this._shapesCollection) {
+			this._shapesCollection = new MockShapeCollection(
+				this._ctx,
+				this._layoutData()?.shapes ?? [],
+				null as unknown as MockSlide,
+			);
+		}
+		return this._shapesCollection;
+	}
+
+	private _layoutData(): MockLayoutData | undefined {
+		const layoutId = this._slideData.layoutId ?? "";
+		const masters = (this._ctx.presentation.slideMasters as any)
+			._data as MockSlideMasterData[];
+		for (const master of masters) {
+			const found = master.layouts.find((ly) => ly.id === layoutId);
+			if (found) return found;
+		}
+		return undefined;
+	}
+
+	load(props: string | string[]) {
+		if (props === "shapes/items/$none") {
+			this._ctx.queueLoad(this.shapes, ["items"]);
+			return;
+		}
+		const propList = Array.isArray(props)
+			? props
+			: props.split(",").map((p) => p.trim());
+		for (const p of propList) this._loaded.add(p);
+		this._ctx.queueLoad(this, propList);
+	}
+
+	_populate(props: string[]) {
+		const l = this._loaded;
+		const name = this._layoutData()?.name ?? "";
+		if (l.has("id") || props.includes("id")) this._id = this._slideData.layoutId ?? "";
+		if (l.has("name") || props.includes("name")) this._name = name;
+	}
+}
+
+// ── Mock Page Setup (presentation.pageSetup) ────────────────────
+
+class MockPageSetup {
+	private _ctx: MockContext;
+	private _data: MockPresentationData;
+	private _loaded = new Set<string>();
+	private _slideWidth = 0;
+	private _slideHeight = 0;
+
+	constructor(ctx: MockContext, data: MockPresentationData) {
+		this._ctx = ctx;
+		this._data = data;
+	}
+
+	get slideWidth() {
+		return this._slideWidth;
+	}
+	get slideHeight() {
+		return this._slideHeight;
+	}
+
 	load(props: string | string[]) {
 		const propList = Array.isArray(props)
 			? props
@@ -483,19 +567,8 @@ class MockAppliedLayout {
 
 	_populate(props: string[]) {
 		const l = this._loaded;
-		const layoutId = this._slideData.layoutId ?? "";
-		const masters = (this._ctx.presentation.slideMasters as any)
-			._data as MockSlideMasterData[];
-		let name = "";
-		for (const master of masters) {
-			const found = master.layouts.find((ly) => ly.id === layoutId);
-			if (found) {
-				name = found.name;
-				break;
-			}
-		}
-		if (l.has("id") || props.includes("id")) this._id = layoutId;
-		if (l.has("name") || props.includes("name")) this._name = name;
+		if (l.has("slideWidth") || props.includes("slideWidth")) this._slideWidth = this._data.slideWidth ?? 960;
+		if (l.has("slideHeight") || props.includes("slideHeight")) this._slideHeight = this._data.slideHeight ?? 540;
 	}
 }
 
@@ -701,6 +774,10 @@ class MockShapeCollection {
 		const idx = this.items.indexOf(shape);
 		if (idx >= 0) this.items.splice(idx, 1);
 	}
+
+	getSlide(): MockSlide {
+		return this._slide;
+	}
 }
 
 // ── Mock Shape ──────────────────────────────────────────────────
@@ -721,6 +798,7 @@ class MockShape {
 	private _height = 0;
 	private _rotation = 0;
 	fill: MockFill;
+	placeholderFormat: MockPlaceholderFormat;
 
 	constructor(
 		ctx: MockContext,
@@ -731,6 +809,7 @@ class MockShape {
 		this._data = data;
 		this._collection = collection;
 		this.fill = new MockFill(ctx, data);
+		this.placeholderFormat = new MockPlaceholderFormat(data);
 	}
 
 	// Getters
@@ -843,6 +922,41 @@ class MockShape {
 		this._ctx.queueAction(() => {
 			this._collection.removeShape(this);
 		});
+	}
+
+	getParentSlide(): MockSlide {
+		return this._collection.getSlide();
+	}
+}
+
+// ── Mock PlaceholderFormat ───────────────────────────────────────
+
+/**
+ * Mirrors PowerPoint.PlaceholderFormat: throws (synchronously, on `.type`
+ * access) for any shape that isn't a placeholder — the same GeneralException
+ * real PowerPoint raises — so tests can exercise resolveInheritedFontSize's
+ * try/catch around non-placeholder layout shapes.
+ */
+class MockPlaceholderFormat {
+	private _data: MockShapeData;
+	private _type = "";
+
+	constructor(data: MockShapeData) {
+		this._data = data;
+	}
+
+	get type(): string {
+		if (!this._data.placeholderType) {
+			throw new Error("GeneralException: shape is not a placeholder");
+		}
+		return this._type;
+	}
+
+	load(_props: string | string[]) {
+		if (!this._data.placeholderType) {
+			throw new Error("GeneralException: shape is not a placeholder");
+		}
+		this._type = this._data.placeholderType;
 	}
 }
 

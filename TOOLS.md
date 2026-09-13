@@ -1,6 +1,6 @@
 # Tool Reference
 
-All 137 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
+All 138 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
 
 ## Shared / Cross-cutting
 
@@ -25,6 +25,7 @@ All 137 MCP tools exposed by this project, grouped by host application and categ
 | `powerpoint_get_table` | Reads all cell text from a table shape |
 | `powerpoint_get_shape_paragraphs` | Returns a shape's text split into paragraphs, each with a start/length span and a groupId pointing into a deduplicated set of font/paragraph/bullet property diffs against the shape's default properties |
 | `powerpoint_get_shape_text_markdown` | Renders a shape's paragraphs as an indented markdown-like list — real bullet markers (`1.`, `a)`, `(iv)`, etc.) for the 16 Latin-representable bullet styles, falling back to `1.`/`2.` for the rest, `bulletChar` (`-`/`*`) for unnumbered paragraphs, indented per paragraph's indentLevel. Inline character formatting is encoded Slack-style: `*bold*`, `_italic_`, `~strike~`, nestable (`*_~combo~_*`), with literal `*`/`_`/`~` backslash-escaped |
+| `powerpoint_get_slide_text_markdown` | Combines every text-bearing shape on a slide into one markdown document, ordered top-to-bottom then left-to-right (rows grouped within 5% of slide height tolerance). A paragraph with effective font size >=32pt renders as `# heading`; a shape with effective font size <=12pt whose bottom edge falls in the last 15% of slide height renders inline as a `[^1] `-prefixed line (no separate footnote block); everything else uses the same bullet/inline-formatting rules as `powerpoint_get_shape_text_markdown` |
 | `powerpoint_get_selection` | Current user selection (text or shapes) |
 | `powerpoint_get_speaker_notes` | Speaker notes for one slide or a range |
 

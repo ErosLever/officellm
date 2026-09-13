@@ -36,12 +36,17 @@ import {
 	markdownToParagraphSpecs,
 	wrapInlineMarkers,
 	parseInlineMarkers,
+	groupShapesIntoRows,
+	isHeadingSize,
+	isFootnoteShape,
 } from "./powerpoint-commands";
 
 // ── Test data ───────────────────────────────────────────────────
 
 function makeTestDeck(): MockPresentationData {
 	return {
+		slideWidth: 960,
+		slideHeight: 540,
 		slides: [
 			{
 				id: "slide_0",
@@ -85,6 +90,7 @@ function makeTestDeck(): MockPresentationData {
 						top: 500,
 						width: 30,
 						height: 20,
+						font: { size: 10 },
 					},
 					{
 						id: "s7",
@@ -312,6 +318,178 @@ describe("powerpoint_get_slide", () => {
 		})) as any;
 		expect(result.error).toContain("out of range");
 	});
+
+	it("resolves a placeholder's inherited font size from its layout when the shape reports the mixed/unresolved size sentinel", async () => {
+		// Mirrors live Office.js: an unfilled Title placeholder with no
+		// run-level font override reports textRange.font.size as the
+		// mixed/unresolved sentinel (0 after safeNum), even though it
+		// visually renders at the size set on the slide layout's own Title
+		// placeholder.
+		mock = new PowerPointMock({
+			slideWidth: 960,
+			slideHeight: 540,
+			slides: [
+				{
+					id: "slide_0",
+					layoutId: "layout_title",
+					shapes: [
+						{
+							id: "sTitle",
+							name: "Title 1",
+							type: "TextBox",
+							text: "Third parties: CVEs",
+							placeholderType: "Title",
+						},
+					],
+					notes: "",
+				},
+			],
+			slideMasters: [
+				{
+					id: "master_0",
+					name: "Office Theme",
+					layouts: [
+						{
+							id: "layout_title",
+							name: "Title and Content",
+							shapes: [
+								{
+									id: "layoutTitle",
+									name: "Title Placeholder 1",
+									type: "TextBox",
+									text: "",
+									placeholderType: "Title",
+									font: { size: 35 },
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand("cmd-6b", "powerpoint_get_slide", {
+			slideIndex: 0,
+		})) as any;
+
+		expect(result.shapes[0].font.size).toBe(35);
+	});
+
+	it("leaves a non-placeholder shape's unresolved font size at 0 rather than throwing", async () => {
+		mock = new PowerPointMock({
+			slideWidth: 960,
+			slideHeight: 540,
+			slides: [
+				{
+					id: "slide_0",
+					layoutId: "layout_title",
+					shapes: [
+						{
+							id: "sPlain",
+							name: "Plain Box",
+							type: "TextBox",
+							text: "Not a placeholder",
+						},
+					],
+					notes: "",
+				},
+			],
+			slideMasters: [
+				{
+					id: "master_0",
+					name: "Office Theme",
+					layouts: [
+						{
+							id: "layout_title",
+							name: "Title and Content",
+							shapes: [
+								{
+									id: "layoutDecor",
+									name: "Decoration",
+									type: "TextBox",
+									text: "",
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand("cmd-6c", "powerpoint_get_slide", {
+			slideIndex: 0,
+		})) as any;
+
+		expect(result.shapes[0].font.size).toBe(0);
+	});
+
+	it("samples a single character's font size when the whole-range getter reports the mixed sentinel despite a uniform real size", async () => {
+		// Mirrors a live Office.js quirk (seen on an all-35pt title): the
+		// whole-range textRange.font.size reports the mixed/unresolved
+		// sentinel even though every character in the range shares one real,
+		// explicit size. The layout's own placeholder has a DIFFERENT size
+		// (25) than the shape's real per-character size (35), so if the
+		// sampling step regressed back to jumping straight to layout
+		// inheritance, this test would catch it by observing 25 instead of
+		// the true 35.
+		mock = new PowerPointMock({
+			slideWidth: 960,
+			slideHeight: 540,
+			slides: [
+				{
+					id: "slide_0",
+					layoutId: "layout_title",
+					shapes: [
+						{
+							id: "sTitle",
+							name: "Title 1",
+							type: "TextBox",
+							text: "Third parties: CVEs",
+							placeholderType: "Title",
+							paragraphs: [
+								{ runs: [{ start: 0, length: 1, font: { size: 35 } }] },
+							],
+						},
+					],
+					notes: "",
+				},
+			],
+			slideMasters: [
+				{
+					id: "master_0",
+					name: "Office Theme",
+					layouts: [
+						{
+							id: "layout_title",
+							name: "Title and Content",
+							shapes: [
+								{
+									id: "layoutTitle",
+									name: "Title Placeholder 1",
+									type: "TextBox",
+									text: "",
+									placeholderType: "Title",
+									font: { size: 25 },
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand("cmd-6e", "powerpoint_get_slide", {
+			slideIndex: 0,
+		})) as any;
+
+		expect(result.shapes[0].font.size).toBe(35);
+	});
 });
 
 describe("powerpoint_get_slide_image", () => {
@@ -526,6 +704,182 @@ describe("powerpoint_get_shape_paragraphs", () => {
 			bulletType: "Numbered",
 			bulletStyle: "ArabicNumeralPeriod",
 		});
+	});
+
+	it("resolves defaultProperties.font.fontSize from the layout when the shape's own size is the mixed/unresolved sentinel", async () => {
+		mock = new PowerPointMock({
+			slideWidth: 960,
+			slideHeight: 540,
+			slides: [
+				{
+					id: "slide_0",
+					layoutId: "layout_title",
+					shapes: [
+						{
+							id: "sTitle",
+							name: "Title 1",
+							type: "TextBox",
+							text: "Third parties: CVEs",
+							placeholderType: "Title",
+						},
+					],
+					notes: "",
+				},
+			],
+			slideMasters: [
+				{
+					id: "master_0",
+					name: "Office Theme",
+					layouts: [
+						{
+							id: "layout_title",
+							name: "Title and Content",
+							shapes: [
+								{
+									id: "layoutTitle",
+									name: "Title Placeholder 1",
+									type: "TextBox",
+									text: "",
+									placeholderType: "Title",
+									font: { size: 35 },
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-gp10",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "sTitle" },
+		)) as any;
+
+		expect(result.defaultProperties.font.fontSize).toBe(35);
+	});
+
+	it("leaves defaultProperties.font.fontSize at 0 when the layout's placeholder counterpart is itself unresolved", async () => {
+		mock = new PowerPointMock({
+			slideWidth: 960,
+			slideHeight: 540,
+			slides: [
+				{
+					id: "slide_0",
+					layoutId: "layout_title",
+					shapes: [
+						{
+							id: "sTitle",
+							name: "Title 1",
+							type: "TextBox",
+							text: "Third parties: CVEs",
+							placeholderType: "Title",
+						},
+					],
+					notes: "",
+				},
+			],
+			slideMasters: [
+				{
+					id: "master_0",
+					name: "Office Theme",
+					layouts: [
+						{
+							id: "layout_title",
+							name: "Title and Content",
+							shapes: [
+								{
+									id: "layoutTitle",
+									name: "Title Placeholder 1",
+									type: "TextBox",
+									text: "",
+									placeholderType: "Title",
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-gp11",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "sTitle" },
+		)) as any;
+
+		expect(result.defaultProperties.font.fontSize).toBe(0);
+	});
+
+	it("samples a single character's font size when the whole-range and full-length-substring getters both report the mixed sentinel despite a uniform real size", async () => {
+		// Same live Office.js quirk as the powerpoint_get_slide regression
+		// test above, exercised through the paragraph-diffing path: the
+		// layout's placeholder counterpart has a DIFFERENT size (25) than
+		// the shape's real per-character size (35), so a regression back to
+		// layout-inheritance-first would surface as 25 instead of 35 here.
+		mock = new PowerPointMock({
+			slideWidth: 960,
+			slideHeight: 540,
+			slides: [
+				{
+					id: "slide_0",
+					layoutId: "layout_title",
+					shapes: [
+						{
+							id: "sTitle",
+							name: "Title 1",
+							type: "TextBox",
+							text: "Third parties: CVEs",
+							placeholderType: "Title",
+							paragraphs: [
+								{ runs: [{ start: 0, length: 1, font: { size: 35 } }] },
+							],
+						},
+					],
+					notes: "",
+				},
+			],
+			slideMasters: [
+				{
+					id: "master_0",
+					name: "Office Theme",
+					layouts: [
+						{
+							id: "layout_title",
+							name: "Title and Content",
+							shapes: [
+								{
+									id: "layoutTitle",
+									name: "Title Placeholder 1",
+									type: "TextBox",
+									text: "",
+									placeholderType: "Title",
+									font: { size: 25 },
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-gp12",
+			"powerpoint_get_shape_paragraphs",
+			{ slideIndex: 0, shapeId: "sTitle" },
+		)) as any;
+
+		expect(result.defaultProperties.font.fontSize).toBe(35);
+		const group0 = result.propertyGroups.find(
+			(g: any) => g.groupId === result.paragraphs[0].groupId,
+		);
+		expect(group0.properties).toEqual({});
 	});
 });
 
@@ -779,6 +1133,254 @@ describe("bullet marker helper functions", () => {
 		expect(toRomanNumeral(9, false)).toBe("ix");
 		expect(toRomanNumeral(19, false)).toBe("xix");
 		expect(toRomanNumeral(19, true)).toBe("XIX");
+	});
+});
+
+describe("groupShapesIntoRows", () => {
+	const slideHeight = 540;
+
+	it("groups shapes with exactly equal top into one row", () => {
+		const shapes = [{ top: 100, left: 50 }, { top: 100, left: 10 }];
+		expect(groupShapesIntoRows(shapes, slideHeight)).toEqual([[1, 0]]);
+	});
+
+	it("treats slight misalignment within 5% of slideHeight as the same row", () => {
+		// 5% of 540 = 27, so tops 100 and 120 (diff 20) are same row
+		const shapes = [{ top: 100, left: 50 }, { top: 120, left: 10 }];
+		expect(groupShapesIntoRows(shapes, slideHeight)).toEqual([[1, 0]]);
+	});
+
+	it("keeps clearly different tops in separate rows", () => {
+		// diff 200 >> 27 tolerance
+		const shapes = [{ top: 30, left: 0 }, { top: 350, left: 0 }, { top: 500, left: 0 }];
+		expect(groupShapesIntoRows(shapes, slideHeight)).toEqual([[0], [1], [2]]);
+	});
+
+	it("orders shapes left-to-right within a row", () => {
+		const shapes = [
+			{ top: 100, left: 300 },
+			{ top: 105, left: 10 },
+			{ top: 102, left: 150 },
+		];
+		expect(groupShapesIntoRows(shapes, slideHeight)).toEqual([[1, 2, 0]]);
+	});
+
+	it("returns rows top-to-bottom, ordered by first-seen top in each row", () => {
+		const shapes = [
+			{ top: 350, left: 0 },
+			{ top: 30, left: 0 },
+			{ top: 500, left: 0 },
+		];
+		expect(groupShapesIntoRows(shapes, slideHeight)).toEqual([[1], [0], [2]]);
+	});
+
+	it("returns an empty array for empty input", () => {
+		expect(groupShapesIntoRows([], slideHeight)).toEqual([]);
+	});
+
+	it("falls back to a fixed tolerance when slideHeight is unavailable", () => {
+		const shapes = [{ top: 100, left: 0 }, { top: 105, left: 0 }, { top: 200, left: 0 }];
+		expect(groupShapesIntoRows(shapes, 0)).toEqual([[0, 1], [2]]);
+	});
+});
+
+describe("isHeadingSize", () => {
+	it("31pt is not a heading, 32pt is", () => {
+		expect(isHeadingSize(31)).toBe(false);
+		expect(isHeadingSize(32)).toBe(true);
+	});
+
+	it("does not qualify when fontSize is 0 (PowerPoint's mixed/unresolved-size sentinel)", () => {
+		expect(isHeadingSize(0)).toBe(false);
+	});
+});
+
+describe("isFootnoteShape", () => {
+	const slideHeight = 540;
+
+	it("qualifies a small-font shape whose bottom edge is in the last 15% of slide height", () => {
+		// last 15% starts at 459; bottom edge here is 470
+		expect(isFootnoteShape({ top: 450, height: 20, fontSize: 12 }, slideHeight)).toBe(true);
+	});
+
+	it("does not qualify when the bottom edge is just outside the last 15%", () => {
+		// bottom edge 458 < 459 threshold
+		expect(isFootnoteShape({ top: 438, height: 20, fontSize: 12 }, slideHeight)).toBe(false);
+	});
+
+	it("does not qualify when font size exceeds 12pt, even at the bottom", () => {
+		expect(isFootnoteShape({ top: 500, height: 20, fontSize: 13 }, slideHeight)).toBe(false);
+	});
+
+	it("does not qualify when fontSize is 0 (PowerPoint's mixed-size sentinel)", () => {
+		expect(isFootnoteShape({ top: 500, height: 20, fontSize: 0 }, slideHeight)).toBe(false);
+	});
+
+	it("does not qualify when slideHeight is unavailable", () => {
+		expect(isFootnoteShape({ top: 500, height: 20, fontSize: 12 }, 0)).toBe(false);
+	});
+});
+
+describe("powerpoint_get_slide_text_markdown", () => {
+	it("combines every text-bearing shape in reading order, rendering headings and footnotes", async () => {
+		const result = (await processCommand(
+			"cmd-sm1",
+			"powerpoint_get_slide_text_markdown",
+			{ slideIndex: 0 },
+		)) as any;
+
+		const blocks = result.markdown.split("\n\n");
+		expect(blocks).toEqual([
+			"# *Quarterly Results*",
+			"- Revenue grew 15%",
+			["- Alpha", "    - Beta", "- Gamma", "- Delta", "- Epsilon"].join("\n"),
+			"[^1] - 1",
+		]);
+	});
+
+	it("skips shapes with no text frame or empty text", async () => {
+		const result = (await processCommand(
+			"cmd-sm2",
+			"powerpoint_get_slide_text_markdown",
+			{ slideIndex: 0 },
+		)) as any;
+
+		expect(result.markdown).not.toContain("undefined");
+		expect(result.markdown.split("\n\n")).toHaveLength(4);
+	});
+
+	it("uses '*' when bulletChar is '*'", async () => {
+		const result = (await processCommand(
+			"cmd-sm3",
+			"powerpoint_get_slide_text_markdown",
+			{ slideIndex: 0, bulletChar: "*" },
+		)) as any;
+
+		expect(result.markdown).toContain("* Revenue grew 15%");
+	});
+
+	it("rejects a bulletChar other than '-' or '*'", async () => {
+		const result = (await processCommand(
+			"cmd-sm4",
+			"powerpoint_get_slide_text_markdown",
+			{ slideIndex: 0, bulletChar: "+" },
+		)) as any;
+
+		expect(result.error).toContain("bulletChar");
+	});
+
+	it("returns error for out-of-range slideIndex", async () => {
+		const result = (await processCommand(
+			"cmd-sm5",
+			"powerpoint_get_slide_text_markdown",
+			{ slideIndex: 99 },
+		)) as any;
+
+		expect(result.error).toContain("out of range");
+	});
+
+	it("does not treat a shape with mixed per-paragraph font sizes (reported as size 0) as a footnote", async () => {
+		// No shape-level font.size is set, so the mock's whole-range size is 0 —
+		// PowerPoint's own sentinel for "not uniform across the range" — even
+		// though every individual paragraph has a real, large font size.
+		mock = new PowerPointMock({
+			slideWidth: 960,
+			slideHeight: 540,
+			slides: [
+				{
+					id: "slide_0",
+					shapes: [
+						{
+							id: "sMixed",
+							name: "Mixed Sizes",
+							type: "TextBox",
+							text: "One\rTwo",
+							left: 50,
+							top: 480,
+							width: 600,
+							height: 40,
+							paragraphs: [{ font: { size: 28 } }, { font: { size: 24 } }] as any,
+						},
+					],
+					notes: "",
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-sm7",
+			"powerpoint_get_slide_text_markdown",
+			{ slideIndex: 0 },
+		)) as any;
+
+		expect(result.markdown).not.toContain("[^1]");
+	});
+
+	it("returns an empty markdown string for a slide with no text-bearing shapes", async () => {
+		const result = (await processCommand(
+			"cmd-sm6",
+			"powerpoint_get_slide_text_markdown",
+			{ slideIndex: 2 },
+		)) as any;
+
+		expect(result.markdown).toBe("");
+	});
+
+	it("renders a placeholder title as a heading using its layout-inherited font size", async () => {
+		mock = new PowerPointMock({
+			slideWidth: 960,
+			slideHeight: 540,
+			slides: [
+				{
+					id: "slide_0",
+					layoutId: "layout_title",
+					shapes: [
+						{
+							id: "sTitle",
+							name: "Title 1",
+							type: "TextBox",
+							text: "Third parties: CVEs",
+							placeholderType: "Title",
+						},
+					],
+					notes: "",
+				},
+			],
+			slideMasters: [
+				{
+					id: "master_0",
+					name: "Office Theme",
+					layouts: [
+						{
+							id: "layout_title",
+							name: "Title and Content",
+							shapes: [
+								{
+									id: "layoutTitle",
+									name: "Title Placeholder 1",
+									type: "TextBox",
+									text: "",
+									placeholderType: "Title",
+									font: { size: 35 },
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		mock.install();
+		mockBridge.reportResult = mock.mockReportResult;
+
+		const result = (await processCommand(
+			"cmd-sm8",
+			"powerpoint_get_slide_text_markdown",
+			{ slideIndex: 0 },
+		)) as any;
+
+		expect(result.markdown).toBe("# Third parties: CVEs");
 	});
 });
 

@@ -51,6 +51,9 @@ export async function processCommand(
 			case "powerpoint_get_shape_text_markdown":
 				result = await handleGetShapeTextMarkdown(args);
 				break;
+			case "powerpoint_get_slide_text_markdown":
+				result = await handleGetSlideTextMarkdown(args);
+				break;
 			case "powerpoint_get_selection":
 				result = await handleGetSelection(args);
 				break;
@@ -606,6 +609,62 @@ async function resolveShape(
 	return shape ? { shape } : { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
 }
 
+/**
+ * Resolves the inherited font size for a shape whose own text range reports
+ * PowerPoint's mixed/unresolved-size sentinel (0 after safeNum) — e.g. an
+ * unfilled placeholder with no run-level font override, which renders at a
+ * size set on the slide layout instead of the shape itself. Matches the
+ * shape to its layout counterpart by placeholder type (e.g. "Title") and
+ * reads that layout shape's own font size. Returns 0 if the shape isn't a
+ * placeholder, has no layout counterpart, or the layout shape's size is
+ * itself unresolved.
+ *
+ * Layout shapes are probed one at a time (rather than batched into a single
+ * load/sync) because `placeholderFormat` throws a GeneralException for any
+ * shape that isn't a placeholder (e.g. a decorative background shape) —
+ * batching would fail the whole sync as soon as one non-placeholder shape
+ * was hit.
+ */
+async function resolveInheritedFontSize(
+	ctx: PowerPoint.RequestContext,
+	shape: PowerPoint.Shape,
+): Promise<number> {
+	let placeholderType = "";
+	try {
+		const pf = shape.placeholderFormat;
+		pf.load("type");
+		await ctx.sync();
+		placeholderType = safeStr(pf.type);
+	} catch {
+		return 0;
+	}
+	if (!placeholderType) return 0;
+
+	const layout = shape.getParentSlide().layout;
+	layout.load("shapes/items/$none");
+	await ctx.sync();
+
+	for (const layoutShape of layout.shapes.items) {
+		let layoutType = "";
+		try {
+			const pf = layoutShape.placeholderFormat;
+			pf.load("type");
+			await ctx.sync();
+			layoutType = safeStr(pf.type);
+		} catch {
+			continue;
+		}
+		if (layoutType !== placeholderType) continue;
+
+		const tf = layoutShape.getTextFrameOrNullObject();
+		ctx.load(tf, "isNullObject,textRange/font/size");
+		await ctx.sync();
+		return tf.isNullObject ? 0 : safeNum(tf.textRange.font.size);
+	}
+
+	return 0;
+}
+
 // ── Read tools ──────────────────────────────────────────────────
 
 async function handleGetDeckOutline(args: unknown): Promise<unknown> {
@@ -738,6 +797,25 @@ async function handleGetSlide(args: unknown): Promise<unknown> {
 		}
 		await ctx.sync();
 
+		// Step 3.5: PowerPoint's whole-range font.size getter can report the
+		// mixed/unresolved sentinel (0 after safeNum) even when every
+		// character in the range shares the same real, explicit size (seen
+		// live: an all-35pt title still reported the sentinel for the whole
+		// range). Sample a single character for any text frame hitting the
+		// sentinel before falling back to the shape's layout-inherited size.
+		const sampleByIndex = new Map<number, any>();
+		for (let i = 0; i < textFrameData.length; i++) {
+			const tf = textFrameData[i];
+			if (tf.isNullObject || !tf.textRange?.font) continue;
+			const text = safeStr(tf.textRange.text);
+			if (safeNum(tf.textRange.font.size) === 0 && text.length > 0) {
+				const sample = tf.textRange.getSubstring(0, 1);
+				ctx.load(sample, "font/size");
+				sampleByIndex.set(i, sample);
+			}
+		}
+		if (sampleByIndex.size > 0) await ctx.sync();
+
 		// Step 4: Build result
 		let slideTitle = "";
 		const shapeList = [];
@@ -752,9 +830,17 @@ async function handleGetSlide(args: unknown): Promise<unknown> {
 			if (!tf.isNullObject) {
 				text = safeStr(tf.textRange?.text);
 				if (tf.textRange?.font) {
+					let size = safeNum(tf.textRange.font.size);
+					if (size === 0) {
+						const sample = sampleByIndex.get(i);
+						size = sample ? safeNum(sample.font.size) : 0;
+					}
+					if (size === 0) {
+						size = await resolveInheritedFontSize(ctx, s);
+					}
 					font = {
 						name: safeStr(tf.textRange.font.name),
-						size: safeNum(tf.textRange.font.size),
+						size,
 						bold: !!tf.textRange.font.bold,
 						italic: !!tf.textRange.font.italic,
 						color: safeStr(tf.textRange.font.color),
@@ -994,12 +1080,53 @@ async function handleGetShapeParagraphs(args: unknown): Promise<unknown> {
 
 		const defaultProperties = extractRangeProperties(tf.textRange);
 
+		// PowerPoint's whole-range font.size getter can report the
+		// mixed/unresolved sentinel (0 after safeNum) even when every
+		// character in the range shares the same real, explicit size (seen
+		// live: an all-35pt title still reported the sentinel for the whole
+		// range and for a getSubstring() spanning its full length). Sample a
+		// single character — which reliably resolves — before falling back
+		// to the shape's layout-inherited size.
+		const needsDefaultSample = safeNum((defaultProperties.font as { fontSize?: number }).fontSize) === 0 && fullText.length > 0;
+		const defaultSample = needsDefaultSample ? tf.textRange.getSubstring(0, 1) : null;
+		if (defaultSample) ctx.load(defaultSample, "font/size");
+
+		const paragraphSamples = paragraphRanges.map((range, index) => {
+			const props = extractRangeProperties(range);
+			const needsSample = safeNum((props.font as { fontSize?: number }).fontSize) === 0 && paragraphSpans[index].length > 0;
+			if (!needsSample) return null;
+			const sample = range.getSubstring(0, 1);
+			ctx.load(sample, "font/size");
+			return sample;
+		});
+		if (defaultSample || paragraphSamples.some(Boolean)) await ctx.sync();
+
+		if (defaultSample) {
+			const sampledSize = safeNum(defaultSample.font.size);
+			defaultProperties.font.fontSize = sampledSize > 0 ? sampledSize : await resolveInheritedFontSize(ctx, shape);
+		}
+
+		// A paragraph reporting the same mixed/unresolved sentinel (0) as the
+		// shape's own whole-range size has no run-level override either, so it
+		// inherits the same resolved size — without this, diffRangeProperties
+		// would surface a spurious fontSize:0 override once defaultProperties
+		// has been corrected above.
+		const paragraphProperties = paragraphRanges.map((range, index) => {
+			const props = extractRangeProperties(range);
+			if (safeNum((props.font as { fontSize?: number }).fontSize) === 0) {
+				const sample = paragraphSamples[index];
+				const sampledSize = sample ? safeNum(sample.font.size) : 0;
+				props.font.fontSize = sampledSize > 0 ? sampledSize : defaultProperties.font.fontSize;
+			}
+			return props;
+		});
+
 		// Dedup by content: identical diffs (even for non-adjacent
 		// paragraphs) share one groupId/propertyGroups entry.
 		const groupIdByDiffKey = new Map<string, number>();
 		const propertyGroups: { groupId: number; properties: Record<string, unknown> }[] = [];
 		const paragraphs = paragraphSpans.map((span, index) => {
-			const diff = diffRangeProperties(extractRangeProperties(paragraphRanges[index]), defaultProperties);
+			const diff = diffRangeProperties(paragraphProperties[index], defaultProperties);
 			const diffKey = JSON.stringify(diff);
 			let groupId = groupIdByDiffKey.get(diffKey);
 			if (groupId === undefined) {
@@ -1151,6 +1278,59 @@ export function parseInlineMarkers(text: string): { text: string; runs: InlineRu
 }
 
 /**
+ * Groups shapes into reading-order rows: sorted top-to-bottom, with shapes
+ * whose `top` differs by no more than 5% of slideHeight treated as the same
+ * row (tolerates slight vertical misalignment), and left-to-right within
+ * each row. Returns arrays of original-array indices, one per row. Falls
+ * back to a fixed 10pt tolerance when slideHeight is unavailable (<= 0).
+ */
+export function groupShapesIntoRows(shapes: { top: number; left: number }[], slideHeight: number): number[][] {
+	const tolerance = slideHeight > 0 ? 0.05 * slideHeight : 10;
+	const order = shapes.map((_, i) => i).sort((a, b) => shapes[a].top - shapes[b].top);
+
+	const rows: number[][] = [];
+	let currentRow: number[] = [];
+	let rowAnchorTop = 0;
+	for (const i of order) {
+		if (currentRow.length === 0 || Math.abs(shapes[i].top - rowAnchorTop) <= tolerance) {
+			if (currentRow.length === 0) rowAnchorTop = shapes[i].top;
+			currentRow.push(i);
+		} else {
+			rows.push(currentRow);
+			currentRow = [i];
+			rowAnchorTop = shapes[i].top;
+		}
+	}
+	if (currentRow.length > 0) rows.push(currentRow);
+
+	for (const row of rows) row.sort((a, b) => shapes[a].left - shapes[b].left);
+	return rows;
+}
+
+/**
+ * A paragraph's effective font size >= 32pt renders as a markdown heading.
+ * `fontSize <= 0` means PowerPoint reported a mixed/unresolved size across the
+ * range (its sentinel for "not uniform" — e.g. an unfilled placeholder with no
+ * run-level override, inheriting from the layout/master) rather than an
+ * actually tiny font, so it never qualifies as a heading either. See
+ * `isFootnoteShape` for the same guard applied to the footnote check.
+ */
+export function isHeadingSize(fontSize: number): boolean {
+	return fontSize > 0 && fontSize >= 32;
+}
+
+/**
+ * A shape qualifies as a footnote when its effective font size is <= 12pt
+ * AND its bottom edge falls within the last 15% of the slide's height.
+ * `fontSize <= 0` means PowerPoint reported a mixed/unknown size across the
+ * range (its sentinel for "not uniform"), not an actually tiny font, so it
+ * never qualifies.
+ */
+export function isFootnoteShape(shape: { top: number; height: number; fontSize: number }, slideHeight: number): boolean {
+	return shape.fontSize > 0 && shape.fontSize <= 12 && slideHeight > 0 && shape.top + shape.height >= 0.85 * slideHeight;
+}
+
+/**
  * Renders paragraphs as an indented markdown-like list, one marker per
  * paragraph, indented by its effective indentLevel (a paragraph's own
  * override if present in propertyGroups, else the shape's defaultProperties
@@ -1162,6 +1342,45 @@ export function parseInlineMarkers(text: string): { text: string; runs: InlineRu
  * (for a "set text from markdown" tool) can sit next to it and reuse the
  * same indent-unit/marker conventions.
  */
+type BulletLevelState = { count: number; wasNumbered: boolean; style: string };
+
+/**
+ * Builds one paragraph's bullet/indent markdown line (e.g. "  1. text") and
+ * advances `levelState` (mutated in place) for numbered-list continuation.
+ * Factored out of `paragraphsToMarkdown` so `shapeParagraphsToSlideMarkdown`
+ * can reuse the same bullet/indent/numbering logic per paragraph while
+ * deciding on a different prefix (heading/footnote) for some paragraphs.
+ */
+function paragraphLineToMarkdown(
+	p: { text: string; groupId: number },
+	runs: InlineRun[],
+	diffByGroupId: Map<number, Record<string, any>>,
+	defaultProperties: RangeProperties,
+	bulletChar: string,
+	levelState: BulletLevelState[],
+): string {
+	const diff = diffByGroupId.get(p.groupId) ?? {};
+	const defaultPf = defaultProperties.paragraphFormat as {
+		indentLevel?: number;
+		bulletType?: string;
+		bulletStyle?: string;
+	};
+	const indentLevel = safeNum(diff.paragraphFormat?.indentLevel, defaultPf.indentLevel);
+	const bulletType = safeStr(diff.paragraphFormat?.bulletType, defaultPf.bulletType);
+	const bulletStyle = safeStr(diff.paragraphFormat?.bulletStyle, defaultPf.bulletStyle);
+	const isNumbered = bulletType === "Numbered";
+
+	levelState.length = Math.min(levelState.length, indentLevel + 1);
+	const prev = levelState[indentLevel];
+	const count = isNumbered && prev?.wasNumbered && prev.style === bulletStyle ? prev.count + 1 : 1;
+	levelState[indentLevel] = { count, wasNumbered: isNumbered, style: bulletStyle };
+
+	const info = BULLET_STYLE_INFO[bulletStyle];
+	const marker = !isNumbered ? bulletChar : info ? formatBulletMarker(info.family, info.wrapper, count) : `${count}.`;
+	const text = wrapInlineMarkers(p.text, runs);
+	return "  ".repeat(indentLevel) + marker + " " + text;
+}
+
 export function paragraphsToMarkdown(
 	paragraphs: { text: string; groupId: number }[],
 	propertyGroups: { groupId: number; properties: Record<string, any> }[],
@@ -1177,30 +1396,48 @@ export function paragraphsToMarkdown(
 	// restarts at 1 the next time that level is reused. A bulletStyle change
 	// at the same level also restarts the count — same "restart on
 	// interruption" semantics already applied to indentLevel changes.
-	const levelState: { count: number; wasNumbered: boolean; style: string }[] = [];
+	const levelState: BulletLevelState[] = [];
+
+	return paragraphs
+		.map((p, index) => paragraphLineToMarkdown(p, wordRuns[index] ?? [], diffByGroupId, defaultProperties, bulletChar, levelState))
+		.join("\n");
+}
+
+/**
+ * Combines a shape's paragraphs into the slide-level markdown block for that
+ * shape, as used by `powerpoint_get_slide_text_markdown`: each paragraph's
+ * *effective* font size (its own diff override, else the shape's default)
+ * decides whether that paragraph renders as a heading (`# `, >=32pt, list
+ * formatting ignored), a footnote (`[^1] ` prefix on the normal bullet line,
+ * when `isFootnote` — computed once for the whole shape — is true), or a
+ * plain bullet/indent line.
+ */
+export function shapeParagraphsToSlideMarkdown(
+	paragraphs: { text: string; groupId: number }[],
+	propertyGroups: { groupId: number; properties: Record<string, any> }[],
+	defaultProperties: RangeProperties,
+	isFootnote: boolean,
+	options: { bulletChar?: string } = {},
+	wordRuns: InlineRun[][] = [],
+): string {
+	const bulletChar = options.bulletChar ?? "-";
+	const diffByGroupId = new Map(propertyGroups.map((g) => [g.groupId, g.properties]));
+	const defaultFontSize = safeNum((defaultProperties.font as { fontSize?: number } | undefined)?.fontSize, 0);
+	const levelState: BulletLevelState[] = [];
 
 	return paragraphs
 		.map((p, index) => {
 			const diff = diffByGroupId.get(p.groupId) ?? {};
-			const defaultPf = defaultProperties.paragraphFormat as {
-				indentLevel?: number;
-				bulletType?: string;
-				bulletStyle?: string;
-			};
-			const indentLevel = safeNum(diff.paragraphFormat?.indentLevel, defaultPf.indentLevel);
-			const bulletType = safeStr(diff.paragraphFormat?.bulletType, defaultPf.bulletType);
-			const bulletStyle = safeStr(diff.paragraphFormat?.bulletStyle, defaultPf.bulletStyle);
-			const isNumbered = bulletType === "Numbered";
+			const fontSize = safeNum(diff.font?.fontSize, defaultFontSize);
+			const runs = wordRuns[index] ?? [];
 
-			levelState.length = Math.min(levelState.length, indentLevel + 1);
-			const prev = levelState[indentLevel];
-			const count = isNumbered && prev?.wasNumbered && prev.style === bulletStyle ? prev.count + 1 : 1;
-			levelState[indentLevel] = { count, wasNumbered: isNumbered, style: bulletStyle };
+			if (isHeadingSize(fontSize)) {
+				levelState.length = 0;
+				return "# " + wrapInlineMarkers(p.text, runs);
+			}
 
-			const info = BULLET_STYLE_INFO[bulletStyle];
-			const marker = !isNumbered ? bulletChar : info ? formatBulletMarker(info.family, info.wrapper, count) : `${count}.`;
-			const text = wrapInlineMarkers(p.text, wordRuns[index] ?? []);
-			return "  ".repeat(indentLevel) + marker + " " + text;
+			const line = paragraphLineToMarkdown(p, runs, diffByGroupId, defaultProperties, bulletChar, levelState);
+			return isFootnote ? "[^1] " + line : line;
 		})
 		.join("\n");
 }
@@ -1289,6 +1526,87 @@ async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
 	);
 
 	return { slideIndex, shapeId, markdown };
+}
+
+async function handleGetSlideTextMarkdown(args: unknown): Promise<unknown> {
+	const config = args as { slideIndex?: number; bulletChar?: string };
+	const slideIndex = config.slideIndex ?? 0;
+	const bulletChar = config.bulletChar ?? "-";
+
+	if (bulletChar !== "-" && bulletChar !== "*") {
+		return { error: `bulletChar must be '-' or '*', got '${bulletChar}'` };
+	}
+
+	const prep = await runInPowerPoint(async (ctx) => {
+		const pres = ctx.presentation;
+		pres.load("slides");
+		pres.pageSetup.load("slideHeight");
+		await ctx.sync();
+
+		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
+			return { error: `Slide index ${slideIndex} out of range (0-${pres.slides.items.length - 1})` };
+		}
+
+		const slideHeight = safeNum(pres.pageSetup.slideHeight);
+		const slide = pres.slides.items[slideIndex];
+		slide.load("shapes/items/$none");
+		await ctx.sync();
+
+		for (const s of slide.shapes.items) {
+			s.load("id,name,left,top,width,height");
+		}
+		await ctx.sync();
+
+		const tfs: any[] = [];
+		for (const s of slide.shapes.items) {
+			const tf = s.getTextFrameOrNullObject();
+			ctx.load(tf, "isNullObject,textRange/text");
+			tfs.push(tf);
+		}
+		await ctx.sync();
+
+		const shapes = slide.shapes.items
+			.map((s: any, i: number) => ({
+				shapeId: safeStr(s.id),
+				left: safeNum(s.left),
+				top: safeNum(s.top),
+				height: safeNum(s.height),
+				hasText: !tfs[i].isNullObject && !!safeStr(tfs[i].textRange?.text).trim(),
+			}))
+			.filter((s: { hasText: boolean }) => s.hasText);
+
+		return { slideHeight, shapes };
+	});
+	if ("error" in prep) return prep;
+	const { slideHeight, shapes } = prep;
+
+	const rows = groupShapesIntoRows(shapes, slideHeight);
+	const orderedShapes = rows.flat().map((i) => shapes[i]);
+
+	const blocks: string[] = [];
+	for (const shape of orderedShapes) {
+		const result = (await handleGetShapeParagraphs({ slideIndex, shapeId: shape.shapeId })) as any;
+		if (result.error) continue;
+
+		const wordRuns = await runInPowerPoint(async (ctx) => {
+			const resolved = await resolveShape(ctx, slideIndex, shape.shapeId);
+			if ("error" in resolved) return [];
+			const tf = resolved.shape.getTextFrameOrNullObject();
+			ctx.load(tf, "isNullObject");
+			await ctx.sync();
+			if (tf.isNullObject) return [];
+			return loadWordRuns(tf, splitParagraphs(result.fullText), ctx);
+		});
+
+		const defaultFontSize = safeNum((result.defaultProperties.font as { fontSize?: number } | undefined)?.fontSize, 0);
+		const isFootnote = isFootnoteShape({ top: shape.top, height: shape.height, fontSize: defaultFontSize }, slideHeight);
+
+		blocks.push(
+			shapeParagraphsToSlideMarkdown(result.paragraphs, result.propertyGroups, result.defaultProperties, isFootnote, { bulletChar }, wordRuns),
+		);
+	}
+
+	return { slideIndex, markdown: blocks.join("\n\n") };
 }
 
 type LevelSlot = { family: BulletFamily; wrapper: BulletWrapper; lastCore: string };
