@@ -127,8 +127,8 @@ public static class McpToolEngine
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps (e.g. 'powerpoint_1')." },
                     ["includeSpeakerNotes"] = new { type = "boolean", description = "Include speaker notes in the outline", @default = false },
                     ["includeHiddenSlides"] = new { type = "boolean", description = "Include hidden slides in the outline", @default = false },
-                    ["startSlide"] = new { type = "integer", description = "Zero-based index of the first slide to include. Default: 0 (start of deck)." },
-                    ["endSlide"] = new { type = "integer", description = "Zero-based index of the last slide to include (inclusive). Default: last slide in the deck." }
+                    ["startSlide"] = new { type = "integer", description = "1-based index of the first slide to include (as shown in the PowerPoint UI). Default: 1 (start of deck)." },
+                    ["endSlide"] = new { type = "integer", description = "1-based index of the last slide to include (inclusive; as shown in the PowerPoint UI). Default: last slide in the deck." }
                 },
                 required = new[] { "instanceId" }
             }
@@ -143,7 +143,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" }
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" }
                 },
                 required = new[] { "instanceId", "slideIndex" }
             }
@@ -158,7 +158,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["width"] = new { type = "integer", description = "Max image width in pixels. Default: 800", @default = 800 },
                     ["height"] = new { type = "integer", description = "Max image height in pixels. Default: omitted (auto)" }
                 },
@@ -175,7 +175,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name to render" },
                     ["width"] = new { type = "integer", description = "Max image width in pixels. Default: 400", @default = 400 },
                     ["height"] = new { type = "integer", description = "Max image height in pixels. Default: omitted (auto)" }
@@ -193,7 +193,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID of the table" }
                 },
                 required = new[] { "instanceId", "slideIndex", "shapeId" }
@@ -209,7 +209,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" }
                 },
                 required = new[] { "instanceId", "slideIndex", "shapeId" }
@@ -225,7 +225,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" },
                     ["bulletChar"] = new { type = "string", description = "Marker for non-numbered paragraphs: '-' or '*'. Default: '-'." }
                 },
@@ -242,7 +242,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["bulletChar"] = new { type = "string", description = "Marker for non-numbered paragraphs: '-' or '*'. Default: '-'." }
                 },
                 required = new[] { "instanceId", "slideIndex" }
@@ -272,7 +272,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index for a single slide" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index for a single slide (as shown in the PowerPoint UI)" },
                     ["slideRange"] = new { type = "string", description = "Range of slides, e.g. '2-5'" }
                 },
                 required = new[] { "instanceId" }
@@ -290,7 +290,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" },
                     ["text"] = new { type = "string", description = "New text content" }
                 },
@@ -307,7 +307,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" },
                     ["left"] = new { type = "number", description = "X position in points" },
                     ["top"] = new { type = "number", description = "Y position in points" },
@@ -352,7 +352,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" },
                     ["start"] = new { type = "integer", description = "REQUIRED. Character offset into the shape's text where the target range begins (as returned by powerpoint_get_shape_paragraphs)." },
                     ["length"] = new { type = "integer", description = "REQUIRED. Length in characters of the target range (as returned by powerpoint_get_shape_paragraphs)." },
@@ -388,7 +388,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" },
                     ["text"] = new { type = "string", description = "REQUIRED. Plain text of the new paragraph (no '\\r')." },
                     ["position"] = new { type = "string", description = "REQUIRED. 'start' (before every paragraph), 'end' (after every paragraph), 'before'/'after' (relative to a reference paragraph identified by refParagraphStart/refParagraphLength)." },
@@ -426,7 +426,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" },
                     ["paragraphStart"] = new { type = "integer", description = "REQUIRED. Character offset into the shape's text where the paragraph begins (the 'start' field returned by powerpoint_get_shape_paragraphs)." },
                     ["paragraphLength"] = new { type = "integer", description = "REQUIRED. Length in characters of the paragraph (the 'length' field returned by powerpoint_get_shape_paragraphs)." },
@@ -445,7 +445,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" },
                     ["markdown"] = new { type = "string", description = "REQUIRED. Markdown-like indented list, in the same flavor produced by powerpoint_get_shape_text_markdown." }
                 },
@@ -462,7 +462,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["notes"] = new { type = "string", description = "Speaker notes text" }
                 },
                 required = new[] { "instanceId", "slideIndex", "notes" }
@@ -480,7 +480,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["text"] = new { type = "string", description = "Initial text content" },
                     ["left"] = new { type = "number", description = "X position in points" },
                     ["top"] = new { type = "number", description = "Y position in points" },
@@ -500,7 +500,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["imageBase64"] = new { type = "string", description = "Base64-encoded image data (PNG, JPG, etc.)" },
                     ["left"] = new { type = "number", description = "X position in points" },
                     ["top"] = new { type = "number", description = "Y position in points" },
@@ -520,7 +520,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["rows"] = new { type = "integer", description = "Number of rows" },
                     ["columns"] = new { type = "integer", description = "Number of columns" },
                     ["left"] = new { type = "number", description = "X position in points" },
@@ -541,7 +541,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index" },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name to delete" }
                 },
                 required = new[] { "instanceId", "slideIndex", "shapeId" }
@@ -559,7 +559,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["atIndex"] = new { type = "integer", description = "Zero-based index to insert at. Default: end of deck." },
+                    ["atIndex"] = new { type = "integer", description = "1-based index to insert at (as shown in the PowerPoint UI). Default: end of deck." },
                     ["layoutId"] = new { type = "string", description = "Layout ID to apply to the new slide (see powerpoint_get_layouts). If slideMasterId is omitted, the layout must exist on the default slide master (the previous slide's master, or the presentation's first master)." },
                     ["slideMasterId"] = new { type = "string", description = "Slide master ID to use for the new slide. If layoutId is omitted but this is set, the first layout on that master is used." }
                 },
@@ -576,7 +576,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based index of the slide whose layout should change." },
+                    ["slideIndex"] = new { type = "integer", description = "1-based index of the slide whose layout should change (as shown in the PowerPoint UI)." },
                     ["layoutId"] = new { type = "string", description = "REQUIRED. Layout ID to apply (see powerpoint_get_layouts)." },
                     ["slideMasterId"] = new { type = "string", description = "Optional slide master ID to disambiguate layoutId when multiple masters define a layout with the same ID." }
                 },
@@ -593,7 +593,7 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based slide index to delete" }
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index to delete (as shown in the PowerPoint UI)" }
                 },
                 required = new[] { "instanceId", "slideIndex" }
             }
@@ -608,8 +608,8 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["fromIndex"] = new { type = "integer", description = "Current zero-based position of the slide" },
-                    ["toIndex"] = new { type = "integer", description = "Target zero-based position" }
+                    ["fromIndex"] = new { type = "integer", description = "Current 1-based position of the slide (as shown in the PowerPoint UI)" },
+                    ["toIndex"] = new { type = "integer", description = "Target 1-based position (as shown in the PowerPoint UI)" }
                 },
                 required = new[] { "instanceId", "fromIndex", "toIndex" }
             }
@@ -624,8 +624,8 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID of the source presentation, from office_get_active_apps." },
-                    ["slideIndex"] = new { type = "integer", description = "Zero-based index of the slide to duplicate. PowerPoint's own slide numbers (as shown in the UI) are one higher than this index." },
-                    ["targetIndex"] = new { type = "integer", description = "Zero-based slide index where the copy should be placed, in the target presentation (same one as instanceId, unless targetInstanceId is set). PowerPoint's own slide numbers (as shown in the UI) are one higher than this index. If omitted: placed right after the source slide when copying within the same presentation, or appended at the end when copying into a different presentation." },
+                    ["slideIndex"] = new { type = "integer", description = "1-based index of the slide to duplicate (as shown in the PowerPoint UI)." },
+                    ["targetIndex"] = new { type = "integer", description = "1-based slide index where the copy should be placed, in the target presentation (same one as instanceId, unless targetInstanceId is set; as shown in the PowerPoint UI). If omitted: placed right after the source slide when copying within the same presentation, or appended at the end when copying into a different presentation." },
                     ["targetInstanceId"] = new { type = "string", description = "Optional instance ID of a different open PowerPoint presentation to copy the slide into." }
                 },
                 required = new[] { "instanceId", "slideIndex" }
@@ -1052,27 +1052,27 @@ public static class McpToolEngine
         new { name = "excel_remove_data_validation", description = "Removes data validation from a range. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["sheetName"] = new { type = "string", description = "Worksheet name." }, ["address"] = new { type = "string", description = "A1-style range address." } }, required = new[] { "instanceId", "sheetName", "address" } } },
 
         // ── Phase 18: PowerPoint Tags & Metadata ──────────────────────
-        new { name = "powerpoint_get_tags", description = "Returns all tags (key-value metadata) on a slide, shape, or presentation. Tags enable audience-specific content filtering.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["target"] = new { type = "string", description = "'presentation', 'slide', or 'shape'. Default: 'presentation'.", @default = "presentation" }, ["slideIndex"] = new { type = "number", description = "0-based slide index (required when target='slide' or 'shape')." }, ["shapeId"] = new { type = "string", description = "Shape ID (required when target='shape')." } }, required = new[] { "instanceId" } } },
-        new { name = "powerpoint_set_tag", description = "Sets a tag (key-value metadata) on a slide, shape, or presentation. Use uppercase keys for consistency.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["key"] = new { type = "string", description = "Tag key (use UPPERCASE, e.g. 'AUDIENCE')." }, ["value"] = new { type = "string", description = "Tag value." }, ["target"] = new { type = "string", description = "'presentation', 'slide', or 'shape'. Default: 'presentation'.", @default = "presentation" }, ["slideIndex"] = new { type = "number", description = "0-based slide index (required for slide/shape targets)." }, ["shapeId"] = new { type = "string", description = "Shape ID (required when target='shape')." } }, required = new[] { "instanceId", "key", "value" } } },
+        new { name = "powerpoint_get_tags", description = "Returns all tags (key-value metadata) on a slide, shape, or presentation. Tags enable audience-specific content filtering.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["target"] = new { type = "string", description = "'presentation', 'slide', or 'shape'. Default: 'presentation'.", @default = "presentation" }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI; required when target='slide' or 'shape')." }, ["shapeId"] = new { type = "string", description = "Shape ID (required when target='shape')." } }, required = new[] { "instanceId" } } },
+        new { name = "powerpoint_set_tag", description = "Sets a tag (key-value metadata) on a slide, shape, or presentation. Use uppercase keys for consistency.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["key"] = new { type = "string", description = "Tag key (use UPPERCASE, e.g. 'AUDIENCE')." }, ["value"] = new { type = "string", description = "Tag value." }, ["target"] = new { type = "string", description = "'presentation', 'slide', or 'shape'. Default: 'presentation'.", @default = "presentation" }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI; required for slide/shape targets)." }, ["shapeId"] = new { type = "string", description = "Shape ID (required when target='shape')." } }, required = new[] { "instanceId", "key", "value" } } },
         new { name = "powerpoint_delete_slides_by_tag", description = "Deletes all slides that have a specific tag key-value pair. Use for audience-specific content filtering (e.g. remove 'Premium' slides).", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["key"] = new { type = "string", description = "Tag key to match." }, ["value"] = new { type = "string", description = "Tag value to match. If omitted, deletes slides that have ANY value for this key." } }, required = new[] { "instanceId", "key" } } },
 
         // ── Phase 18: PowerPoint Shape Formatting ─────────────────────
-        new { name = "powerpoint_set_shape_fill", description = "Sets the fill color, transparency, or image fill on a shape. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "0-based slide index." }, ["shapeId"] = new { type = "string", description = "Shape ID." }, ["fillType"] = new { type = "string", description = "'solid', 'image', or 'none'. Default: 'solid'.", @default = "solid" }, ["color"] = new { type = "string", description = "HTML color (#RRGGBB or named color like 'blue')." }, ["transparency"] = new { type = "number", description = "Transparency 0.0 (opaque) to 1.0 (clear)." }, ["imageBase64"] = new { type = "string", description = "Base64-encoded image for image fill." } }, required = new[] { "instanceId", "slideIndex", "shapeId" } } },
-        new { name = "powerpoint_set_shape_line", description = "Sets the line/border format on a shape: color, width, style. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "0-based slide index." }, ["shapeId"] = new { type = "string", description = "Shape ID." }, ["color"] = new { type = "string", description = "Line color (#RRGGBB or named)." }, ["width"] = new { type = "number", description = "Line width in points." }, ["style"] = new { type = "string", description = "'solid', 'dash', 'dashDot', 'dashDotDot', 'longDash', 'roundDot'." }, ["visible"] = new { type = "boolean", description = "Show/hide the line. Default: true." } }, required = new[] { "instanceId", "slideIndex", "shapeId" } } },
-        new { name = "powerpoint_set_shape_rotation", description = "Rotates a shape by the specified degrees. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "0-based slide index." }, ["shapeId"] = new { type = "string", description = "Shape ID." }, ["degrees"] = new { type = "number", description = "Rotation in degrees (0-360)." } }, required = new[] { "instanceId", "slideIndex", "shapeId", "degrees" } } },
+        new { name = "powerpoint_set_shape_fill", description = "Sets the fill color, transparency, or image fill on a shape. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI)." }, ["shapeId"] = new { type = "string", description = "Shape ID." }, ["fillType"] = new { type = "string", description = "'solid', 'image', or 'none'. Default: 'solid'.", @default = "solid" }, ["color"] = new { type = "string", description = "HTML color (#RRGGBB or named color like 'blue')." }, ["transparency"] = new { type = "number", description = "Transparency 0.0 (opaque) to 1.0 (clear)." }, ["imageBase64"] = new { type = "string", description = "Base64-encoded image for image fill." } }, required = new[] { "instanceId", "slideIndex", "shapeId" } } },
+        new { name = "powerpoint_set_shape_line", description = "Sets the line/border format on a shape: color, width, style. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI)." }, ["shapeId"] = new { type = "string", description = "Shape ID." }, ["color"] = new { type = "string", description = "Line color (#RRGGBB or named)." }, ["width"] = new { type = "number", description = "Line width in points." }, ["style"] = new { type = "string", description = "'solid', 'dash', 'dashDot', 'dashDotDot', 'longDash', 'roundDot'." }, ["visible"] = new { type = "boolean", description = "Show/hide the line. Default: true." } }, required = new[] { "instanceId", "slideIndex", "shapeId" } } },
+        new { name = "powerpoint_set_shape_rotation", description = "Rotates a shape by the specified degrees. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI)." }, ["shapeId"] = new { type = "string", description = "Shape ID." }, ["degrees"] = new { type = "number", description = "Rotation in degrees (0-360)." } }, required = new[] { "instanceId", "slideIndex", "shapeId", "degrees" } } },
 
         // ── Phase 18: PowerPoint Geometric Shapes & Lines ─────────────
-        new { name = "powerpoint_add_geometric_shape", description = "Adds a geometric shape (rectangle, circle, arrow, etc.) to a slide. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "0-based slide index." }, ["shapeType"] = new { type = "string", description = "GeometricShapeType: 'rectangle', 'oval', 'triangle', 'rightArrow', 'chevron', 'star5', 'heart', etc." }, ["left"] = new { type = "number", description = "Left position in points." }, ["top"] = new { type = "number", description = "Top position in points." }, ["width"] = new { type = "number", description = "Width in points." }, ["height"] = new { type = "number", description = "Height in points." } }, required = new[] { "instanceId", "slideIndex", "shapeType" } } },
-        new { name = "powerpoint_add_line", description = "Adds a line/connector to a slide. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "0-based slide index." }, ["startX"] = new { type = "number", description = "Start X in points." }, ["startY"] = new { type = "number", description = "Start Y in points." }, ["endX"] = new { type = "number", description = "End X in points." }, ["endY"] = new { type = "number", description = "End Y in points." }, ["connectorType"] = new { type = "string", description = "'straight', 'elbow', or 'curve'. Default: 'straight'.", @default = "straight" } }, required = new[] { "instanceId", "slideIndex", "startX", "startY", "endX", "endY" } } },
+        new { name = "powerpoint_add_geometric_shape", description = "Adds a geometric shape (rectangle, circle, arrow, etc.) to a slide. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI)." }, ["shapeType"] = new { type = "string", description = "GeometricShapeType: 'rectangle', 'oval', 'triangle', 'rightArrow', 'chevron', 'star5', 'heart', etc." }, ["left"] = new { type = "number", description = "Left position in points." }, ["top"] = new { type = "number", description = "Top position in points." }, ["width"] = new { type = "number", description = "Width in points." }, ["height"] = new { type = "number", description = "Height in points." } }, required = new[] { "instanceId", "slideIndex", "shapeType" } } },
+        new { name = "powerpoint_add_line", description = "Adds a line/connector to a slide. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI)." }, ["startX"] = new { type = "number", description = "Start X in points." }, ["startY"] = new { type = "number", description = "Start Y in points." }, ["endX"] = new { type = "number", description = "End X in points." }, ["endY"] = new { type = "number", description = "End Y in points." }, ["connectorType"] = new { type = "string", description = "'straight', 'elbow', or 'curve'. Default: 'straight'.", @default = "straight" } }, required = new[] { "instanceId", "slideIndex", "startX", "startY", "endX", "endY" } } },
 
         // ── Phase 18: PowerPoint Slide Merge ───────────────────────────
-        new { name = "powerpoint_insert_slides_from_file", description = "Inserts slides from another PowerPoint file (base64) into the current presentation. Enables template merging.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["base64File"] = new { type = "string", description = "Base64-encoded PPTX file to insert slides from." }, ["insertAfterSlideIndex"] = new { type = "number", description = "0-based slide index to insert after. Default: end of presentation." }, ["slideIndexes"] = new { type = "string", description = "Comma-separated 0-based indexes of slides to insert (e.g. '0,2,5'). Default: all slides." }, ["formatting"] = new { type = "string", description = "'useDestinationTheme' or 'keepSourceFormatting'. Default: 'useDestinationTheme'.", @default = "useDestinationTheme" } }, required = new[] { "instanceId", "base64File" } } },
+        new { name = "powerpoint_insert_slides_from_file", description = "Inserts slides from another PowerPoint file (base64) into the current presentation. Enables template merging.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["base64File"] = new { type = "string", description = "Base64-encoded PPTX file to insert slides from." }, ["insertAfterSlideIndex"] = new { type = "number", description = "1-based slide index to insert after (as shown in the PowerPoint UI). Default: end of presentation." }, ["slideIndexes"] = new { type = "string", description = "Comma-separated 1-based indexes of slides to insert, as shown in the PowerPoint UI of the source file (e.g. '1,3,6'). Default: all slides." }, ["formatting"] = new { type = "string", description = "'useDestinationTheme' or 'keepSourceFormatting'. Default: 'useDestinationTheme'.", @default = "useDestinationTheme" } }, required = new[] { "instanceId", "base64File" } } },
 
         // ── Phase 18: PowerPoint Layouts & Theme ────────────────────────
         new { name = "powerpoint_get_layouts", description = "Returns all available slide layouts from the slide master with names and IDs.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." } }, required = new[] { "instanceId" } } },
         new { name = "powerpoint_get_theme_colors", description = "Returns the theme color scheme from the slide master (10 named colors).", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." } }, required = new[] { "instanceId" } } },
-        new { name = "powerpoint_group_shapes", description = "Groups multiple shapes into a single group shape. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "0-based slide index." }, ["shapeIds"] = new { type = "string", description = "Comma-separated shape IDs to group." } }, required = new[] { "instanceId", "slideIndex", "shapeIds" } } },
-        new { name = "powerpoint_ungroup_shape", description = "Ungroups a grouped shape into its individual shapes. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "0-based slide index." }, ["shapeId"] = new { type = "string", description = "Shape ID of the group to ungroup." } }, required = new[] { "instanceId", "slideIndex", "shapeId" } } },
+        new { name = "powerpoint_group_shapes", description = "Groups multiple shapes into a single group shape. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI)." }, ["shapeIds"] = new { type = "string", description = "Comma-separated shape IDs to group." } }, required = new[] { "instanceId", "slideIndex", "shapeIds" } } },
+        new { name = "powerpoint_ungroup_shape", description = "Ungroups a grouped shape into its individual shapes. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["slideIndex"] = new { type = "number", description = "1-based slide index (as shown in the PowerPoint UI)." }, ["shapeId"] = new { type = "string", description = "Shape ID of the group to ungroup." } }, required = new[] { "instanceId", "slideIndex", "shapeId" } } },
 
         // ── Phase 18: Word Bookmarks ────────────────────────────────────
         new { name = "word_get_bookmarks", description = "Returns all bookmarks in the document with names and ranges.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." } }, required = new[] { "instanceId" } } },

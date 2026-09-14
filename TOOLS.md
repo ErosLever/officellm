@@ -15,6 +15,8 @@ All 138 MCP tools exposed by this project, grouped by host application and categ
 
 ## PowerPoint
 
+All slide-index parameters (`slideIndex`, `atIndex`, `fromIndex`/`toIndex`, `targetIndex`, `startSlide`/`endSlide`, `insertAfterSlideIndex`, `slideIndexes`) are 1-based, matching the slide numbers shown in the PowerPoint UI — slide "1" is the first slide in the deck.
+
 ### Read
 | Tool | Description |
 |---|---|

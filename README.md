@@ -245,6 +245,7 @@ These are hard-won lessons from building this project. Follow them to avoid know
 - **`PowerPoint.run()` is lowercase** — not `Run()`, `Excel.Run()`, etc. The Office JS API uses camelCase (`run`, not `Run`). A typo here silently fails with "PowerPoint.run() not available" because `PowerPoint.Run` is `undefined`.
 - **Use slash-separated load paths** — `slide.load("shapes/items/id,name,textFrame/textRange/text")` loads nested collections and their properties in one call. This is the official pattern from Microsoft docs.
 - **`presentation.load("slides")`** — loads the slides navigation property. After sync, `slides.items` is available.
+- **Slide indices are 1-based at the tool boundary** — every `powerpoint_*` MCP tool with a slide-index-shaped parameter counts from 1, matching the slide numbers shown in the PowerPoint UI. `slides.items`/`getItemAt` themselves are 0-based, so the add-in converts only at the point of native indexing.
 - **`shape.textFrame` throws `InvalidArgument`** if the shape has no text frame. Always wrap in try/catch.
 - **`context.load(collection, ["items"])` is INVALID** — use `presentation.load("slides")` or `slide.load("shapes/items/$none")` instead.
 - **`@types/office-js` is incomplete** — many newer PowerPoint context types lack type definitions. Use `any` casts and `PowerPoint.run(async (context: any) => ...)`.

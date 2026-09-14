@@ -578,7 +578,38 @@ function diffRangeProperties(
 }
 
 /**
- * Resolves a slide index + shapeId (id or name) to a live Shape object.
+ * Slide indices are 1-based at the tool boundary (matching the PowerPoint UI's own
+ * slide numbering) but 0-based internally (OfficeJS's pres.slides.items[i]). Convert
+ * only at the point of native indexing — everywhere else the value stays 1-based.
+ */
+function toZeroBasedSlideIndex(oneBased: number): number {
+	return oneBased - 1;
+}
+function toOneBasedSlideIndex(zeroBased: number): number {
+	return zeroBased + 1;
+}
+
+/**
+ * Resolves a 1-based slide index to a live Slide object.
+ * Shared by every handler that operates on a single slide (no shape).
+ */
+async function resolveSlide(
+	ctx: PowerPoint.RequestContext,
+	slideIndex: number,
+): Promise<{ slide: PowerPoint.Slide } | { error: string }> {
+	const pres = ctx.presentation;
+	pres.load("slides");
+	await ctx.sync();
+
+	if (slideIndex < 1 || slideIndex > pres.slides.items.length) {
+		return { error: `Slide index ${slideIndex} out of range (1-${pres.slides.items.length})` };
+	}
+
+	return { slide: pres.slides.items[toZeroBasedSlideIndex(slideIndex)] };
+}
+
+/**
+ * Resolves a 1-based slide index + shapeId (id or name) to a live Shape object.
  * Shared by every handler that operates on a single named/id'd shape.
  */
 async function resolveShape(
@@ -590,11 +621,11 @@ async function resolveShape(
 	pres.load("slides");
 	await ctx.sync();
 
-	if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-		return { error: `Slide index ${slideIndex} out of range` };
+	if (slideIndex < 1 || slideIndex > pres.slides.items.length) {
+		return { error: `Slide index ${slideIndex} out of range (1-${pres.slides.items.length})` };
 	}
 
-	const slide = pres.slides.items[slideIndex];
+	const slide = pres.slides.items[toZeroBasedSlideIndex(slideIndex)];
 	slide.load("shapes/items/$none");
 	await ctx.sync();
 
@@ -677,10 +708,10 @@ async function handleGetDeckOutline(args: unknown): Promise<unknown> {
 
 		const totalSlides = pres.slides.items.length;
 
-		const from = Math.max(0, config.startSlide ?? 0);
-		const to = Math.min(totalSlides - 1, config.endSlide ?? totalSlides - 1);
+		const from = Math.max(0, toZeroBasedSlideIndex(config.startSlide ?? 1));
+		const to = Math.min(totalSlides - 1, toZeroBasedSlideIndex(config.endSlide ?? totalSlides));
 		if (from > to) {
-			return { error: `Invalid slide range: startSlide (${from}) is after endSlide (${to}).` };
+			return { error: `Invalid slide range: startSlide (${toOneBasedSlideIndex(from)}) is after endSlide (${toOneBasedSlideIndex(to)}).` };
 		}
 		const indices: number[] = [];
 		for (let i = from; i <= to; i++) indices.push(i);
@@ -741,8 +772,8 @@ async function handleGetDeckOutline(args: unknown): Promise<unknown> {
 			}
 
 			slideList.push({
-				index: i,
-				title: title || `Slide ${i + 1}`,
+				index: toOneBasedSlideIndex(i),
+				title: title || `Slide ${toOneBasedSlideIndex(i)}`,
 				shapes: shapeData,
 			});
 		}
@@ -753,20 +784,12 @@ async function handleGetDeckOutline(args: unknown): Promise<unknown> {
 
 async function handleGetSlide(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number };
-	const slideIndex = config.slideIndex ?? 0;
+	const slideIndex = config.slideIndex ?? 1;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return {
-				error: `Slide index ${slideIndex} out of range (0-${pres.slides.items.length - 1})`,
-			};
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 
 		// Step 1: Load shape items + applied layout
 		slide.load("shapes/items/$none");
@@ -871,7 +894,7 @@ async function handleGetSlide(args: unknown): Promise<unknown> {
 
 		return {
 			slideIndex,
-			title: slideTitle || `Slide ${slideIndex + 1}`,
+			title: slideTitle || `Slide ${slideIndex}`,
 			shapes: shapeList,
 			layout: { id: safeStr(slide.layout.id), name: safeStr(slide.layout.name) },
 		};
@@ -884,18 +907,12 @@ async function handleGetSlideImage(args: unknown): Promise<unknown> {
 		width?: number;
 		height?: number;
 	};
-	const slideIndex = config.slideIndex ?? 0;
+	const slideIndex = config.slideIndex ?? 1;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 		const imageOptions: any = {};
 		if (config.width) imageOptions.width = config.width;
 		if (config.height) imageOptions.height = config.height;
@@ -917,19 +934,13 @@ async function handleGetShapeImage(args: unknown): Promise<unknown> {
 		width?: number;
 		height?: number;
 	};
-	const slideIndex = config.slideIndex ?? 0;
+	const slideIndex = config.slideIndex ?? 1;
 	const shapeId = config.shapeId ?? "";
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 		slide.load("shapes/items/$none");
 		await ctx.sync();
 
@@ -968,19 +979,13 @@ async function handleGetShapeImage(args: unknown): Promise<unknown> {
 
 async function handleGetTable(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; shapeId?: string };
-	const slideIndex = config.slideIndex ?? 0;
+	const slideIndex = config.slideIndex ?? 1;
 	const shapeId = config.shapeId ?? "";
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 		slide.load("shapes/items/$none");
 		await ctx.sync();
 
@@ -1046,7 +1051,7 @@ async function handleGetTable(args: unknown): Promise<unknown> {
 
 async function handleGetShapeParagraphs(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; shapeId?: string };
-	const slideIndex = config.slideIndex ?? 0;
+	const slideIndex = config.slideIndex ?? 1;
 	const shapeId = config.shapeId ?? "";
 
 	return runInPowerPoint(async (ctx) => {
@@ -1496,7 +1501,7 @@ async function loadWordRuns(
 
 async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; shapeId?: string; bulletChar?: string };
-	const slideIndex = config.slideIndex ?? 0;
+	const slideIndex = config.slideIndex ?? 1;
 	const shapeId = config.shapeId ?? "";
 	const bulletChar = config.bulletChar ?? "-";
 
@@ -1530,7 +1535,7 @@ async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
 
 async function handleGetSlideTextMarkdown(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; bulletChar?: string };
-	const slideIndex = config.slideIndex ?? 0;
+	const slideIndex = config.slideIndex ?? 1;
 	const bulletChar = config.bulletChar ?? "-";
 
 	if (bulletChar !== "-" && bulletChar !== "*") {
@@ -1543,12 +1548,12 @@ async function handleGetSlideTextMarkdown(args: unknown): Promise<unknown> {
 		pres.pageSetup.load("slideHeight");
 		await ctx.sync();
 
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range (0-${pres.slides.items.length - 1})` };
+		if (slideIndex < 1 || slideIndex > pres.slides.items.length) {
+			return { error: `Slide index ${slideIndex} out of range (1-${pres.slides.items.length})` };
 		}
 
 		const slideHeight = safeNum(pres.pageSetup.slideHeight);
-		const slide = pres.slides.items[slideIndex];
+		const slide = pres.slides.items[toZeroBasedSlideIndex(slideIndex)];
 		slide.load("shapes/items/$none");
 		await ctx.sync();
 
@@ -1878,12 +1883,12 @@ async function handleGetSpeakerNotes(args: unknown): Promise<unknown> {
 		// Determine which slides to read
 		let indices: number[] = [];
 		if (slideIndex != null) {
-			indices = [slideIndex];
+			indices = [toZeroBasedSlideIndex(slideIndex)];
 		} else if (config.slideRange) {
 			const match = config.slideRange.match(/^(\d+)-(\d+)$/);
 			if (match) {
-				const from = parseInt(match[1]);
-				const to = parseInt(match[2]);
+				const from = toZeroBasedSlideIndex(parseInt(match[1]));
+				const to = toZeroBasedSlideIndex(parseInt(match[2]));
 				for (let i = from; i <= to && i < pres.slides.items.length; i++) {
 					indices.push(i);
 				}
@@ -1905,7 +1910,7 @@ async function handleGetSpeakerNotes(args: unknown): Promise<unknown> {
 
 		for (const idx of indices) {
 			if (idx < 0 || idx >= pres.slides.items.length) {
-				notes.push({ slideIndex: idx, notes: "" });
+				notes.push({ slideIndex: toOneBasedSlideIndex(idx), notes: "" });
 				notesTfs.push(null);
 				continue;
 			}
@@ -1924,7 +1929,7 @@ async function handleGetSpeakerNotes(args: unknown): Promise<unknown> {
 			if (tf && !tf.isNullObject && tf.textRange?.text) {
 				noteText = String(tf.textRange.text).trim();
 			}
-			notes.push({ slideIndex: indices[i], notes: noteText });
+			notes.push({ slideIndex: toOneBasedSlideIndex(indices[i]), notes: noteText });
 		}
 
 		return { notes };
@@ -1939,7 +1944,7 @@ async function handleUpdateShapeText(args: unknown): Promise<unknown> {
 		shapeId?: string;
 		text?: string;
 	};
-	const { slideIndex = 0, shapeId = "", text = "" } = config;
+	const { slideIndex = 1, shapeId = "", text = "" } = config;
 
 	return runInPowerPoint(async (ctx) => {
 		const resolved = await resolveShape(ctx, slideIndex, shapeId);
@@ -1999,7 +2004,7 @@ async function handleUpdateShapeProperties(args: unknown): Promise<unknown> {
 		wordWrap?: boolean;
 		verticalAlignment?: string;
 	};
-	const { slideIndex = 0, shapeId = "" } = config;
+	const { slideIndex = 1, shapeId = "" } = config;
 
 	return runInPowerPoint(async (ctx) => {
 		const resolved = await resolveShape(ctx, slideIndex, shapeId);
@@ -2166,7 +2171,7 @@ async function handleUpdateTextRangeProperties(args: unknown): Promise<unknown> 
 		expectedText?: string;
 		[key: string]: unknown;
 	};
-	const { slideIndex = 0, shapeId = "", start = 0, length = 0 } = config;
+	const { slideIndex = 1, shapeId = "", start = 0, length = 0 } = config;
 
 	return runInPowerPoint(async (ctx) => {
 		const resolved = await resolveShape(ctx, slideIndex, shapeId);
@@ -2219,7 +2224,7 @@ async function handleInsertParagraph(args: unknown): Promise<unknown> {
 		[key: string]: unknown;
 	};
 	const {
-		slideIndex = 0,
+		slideIndex = 1,
 		shapeId = "",
 		text = "",
 		position = "end",
@@ -2318,7 +2323,7 @@ async function handleDeleteParagraph(args: unknown): Promise<unknown> {
 		paragraphLength?: number;
 		expectedText?: string;
 	};
-	const { slideIndex = 0, shapeId = "", paragraphStart = 0, paragraphLength = 0 } = config;
+	const { slideIndex = 1, shapeId = "", paragraphStart = 0, paragraphLength = 0 } = config;
 
 	return runInPowerPoint(async (ctx) => {
 		const resolved = await resolveShape(ctx, slideIndex, shapeId);
@@ -2382,7 +2387,7 @@ async function handleSetShapeTextMarkdown(args: unknown): Promise<unknown> {
 		shapeId?: string;
 		markdown?: string;
 	};
-	const { slideIndex = 0, shapeId = "", markdown = "" } = config;
+	const { slideIndex = 1, shapeId = "", markdown = "" } = config;
 
 	const specs = markdownToParagraphSpecs(markdown);
 	if ("error" in specs) return specs;
@@ -2450,19 +2455,13 @@ async function handleSetShapeTextMarkdown(args: unknown): Promise<unknown> {
 
 async function handleUpdateSpeakerNotes(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; notes?: string };
-	const { slideIndex = 0, notes = "" } = config;
+	const { slideIndex = 1, notes = "" } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
-		const notesSlide = slide.getNotesSlideOrNullObject();
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
+		const notesSlide = (slide as any).getNotesSlideOrNullObject();
 		const tf = notesSlide.textFrame;
 		ctx.load(tf, "isNullObject,textRange/text");
 		await ctx.sync();
@@ -2490,7 +2489,7 @@ async function handleAddTextbox(args: unknown): Promise<unknown> {
 		height?: number;
 	};
 	const {
-		slideIndex = 0,
+		slideIndex = 1,
 		text = "",
 		left = 100,
 		top = 100,
@@ -2499,15 +2498,9 @@ async function handleAddTextbox(args: unknown): Promise<unknown> {
 	} = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 		const textbox = slide.shapes.addTextBox(text, { left, top, width, height });
 		textbox.load("id,name");
 		await ctx.sync();
@@ -2529,18 +2522,12 @@ async function handleAddImage(args: unknown): Promise<unknown> {
 		width?: number;
 		height?: number;
 	};
-	const { slideIndex = 0, imageBase64 = "", left = 100, top = 100 } = config;
+	const { slideIndex = 1, imageBase64 = "", left = 100, top = 100 } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 
 		// Strip data URI prefix if present
 		const base64Data = imageBase64.replace(/^data:image\/[^;]+;base64,/, "");
@@ -2549,7 +2536,7 @@ async function handleAddImage(args: unknown): Promise<unknown> {
 		if (config.width !== undefined) options.width = config.width;
 		if (config.height !== undefined) options.height = config.height;
 
-		const picture = slide.shapes.addPicture(base64Data, options);
+		const picture = (slide.shapes as any).addPicture(base64Data, options);
 		picture.load("id,name");
 		await ctx.sync();
 
@@ -2572,7 +2559,7 @@ async function handleAddTable(args: unknown): Promise<unknown> {
 		height?: number;
 	};
 	const {
-		slideIndex = 0,
+		slideIndex = 1,
 		rows = 2,
 		columns = 2,
 		left = 100,
@@ -2580,15 +2567,9 @@ async function handleAddTable(args: unknown): Promise<unknown> {
 	} = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 
 		const options: any = { left, top };
 		if (config.width !== undefined) options.width = config.width;
@@ -2608,18 +2589,12 @@ async function handleAddTable(args: unknown): Promise<unknown> {
 
 async function handleDeleteShape(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; shapeId?: string };
-	const { slideIndex = 0, shapeId = "" } = config;
+	const { slideIndex = 1, shapeId = "" } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 		slide.load("shapes/items/$none");
 		await ctx.sync();
 
@@ -2654,7 +2629,7 @@ async function handleAddSlide(args: unknown): Promise<unknown> {
 
 		const options: any = {};
 		if (config.atIndex !== undefined) {
-			options.index = config.atIndex;
+			options.index = toZeroBasedSlideIndex(config.atIndex);
 		}
 		if (config.layoutId !== undefined) {
 			options.layoutId = config.layoutId;
@@ -2672,7 +2647,7 @@ async function handleAddSlide(args: unknown): Promise<unknown> {
 		// The new slide is at the specified index (or end)
 		const newIndex =
 			config.atIndex !== undefined
-				? Math.min(config.atIndex, pres.slides.items.length - 1)
+				? Math.min(toZeroBasedSlideIndex(config.atIndex), pres.slides.items.length - 1)
 				: pres.slides.items.length - 1;
 
 		const newSlide = pres.slides.items[newIndex];
@@ -2680,7 +2655,7 @@ async function handleAddSlide(args: unknown): Promise<unknown> {
 		await ctx.sync();
 
 		return {
-			slideIndex: newIndex,
+			slideIndex: toOneBasedSlideIndex(newIndex),
 			slideId: safeStr(newSlide.id),
 		};
 	});
@@ -2688,18 +2663,12 @@ async function handleAddSlide(args: unknown): Promise<unknown> {
 
 async function handleDeleteSlide(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number };
-	const { slideIndex = 0 } = config;
+	const { slideIndex = 1 } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 		slide.delete();
 		await ctx.sync();
 
@@ -2709,23 +2678,17 @@ async function handleDeleteSlide(args: unknown): Promise<unknown> {
 
 async function handleMoveSlide(args: unknown): Promise<unknown> {
 	const config = args as { fromIndex?: number; toIndex?: number };
-	const { fromIndex = 0, toIndex = 0 } = config;
+	const { fromIndex = 1, toIndex = 1 } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (fromIndex < 0 || fromIndex >= pres.slides.items.length) {
-			return { error: `fromIndex ${fromIndex} out of range` };
-		}
-
-		const slide = pres.slides.items[fromIndex];
+		const resolved = await resolveSlide(ctx, fromIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 		slide.load("id");
 		await ctx.sync();
 
 		const slideId = safeStr(slide.id);
-		slide.moveTo(toIndex);
+		slide.moveTo(toZeroBasedSlideIndex(toIndex));
 		await ctx.sync();
 
 		return { fromIndex, toIndex, slideId };
@@ -2734,7 +2697,7 @@ async function handleMoveSlide(args: unknown): Promise<unknown> {
 
 async function handleDuplicateSlide(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; targetIndex?: number };
-	const { slideIndex = 0, targetIndex } = config;
+	const { slideIndex = 1, targetIndex } = config;
 
 	return runInPowerPoint(async (ctx) => {
 		const PowerPoint: any = (window as any).PowerPoint;
@@ -2743,19 +2706,19 @@ async function handleDuplicateSlide(args: unknown): Promise<unknown> {
 		await ctx.sync();
 
 		const slideCount = pres.slides.items.length;
-		if (slideIndex < 0 || slideIndex >= slideCount) {
+		if (slideIndex < 1 || slideIndex > slideCount) {
 			return { error: `Slide index ${slideIndex} out of range (deck has ${slideCount} slides)` };
 		}
 
 		// Validate before mutating: once the duplicate is inserted the deck has slideCount + 1
-		// slides, so valid target positions are 0..slideCount inclusive (slideCount itself means
-		// "append after the new last slide"). Checking this up front avoids leaving a stray
+		// slides, so valid target positions are 1..slideCount+1 inclusive (slideCount+1 itself
+		// means "append after the new last slide"). Checking this up front avoids leaving a stray
 		// duplicate behind when the request is rejected.
-		if (targetIndex !== undefined && (targetIndex < 0 || targetIndex > slideCount)) {
-			return { error: `targetIndex ${targetIndex} out of range (deck has ${slideCount} slides; valid range is 0-${slideCount})` };
+		if (targetIndex !== undefined && (targetIndex < 1 || targetIndex > slideCount + 1)) {
+			return { error: `targetIndex ${targetIndex} out of range (deck has ${slideCount} slides; valid range is 1-${slideCount + 1})` };
 		}
 
-		const sourceSlide = pres.slides.items[slideIndex];
+		const sourceSlide = pres.slides.items[toZeroBasedSlideIndex(slideIndex)];
 		sourceSlide.load("id");
 		await ctx.sync();
 
@@ -2773,17 +2736,17 @@ async function handleDuplicateSlide(args: unknown): Promise<unknown> {
 		pres.load("slides");
 		await ctx.sync();
 
-		const newSlideIndex = slideIndex + 1;
+		const newSlideIndex = toZeroBasedSlideIndex(slideIndex) + 1;
 		const newSlide = pres.slides.items[newSlideIndex];
 		newSlide.load("id");
 		await ctx.sync();
 		const newSlideId = safeStr(newSlide.id);
 
 		let finalIndex = newSlideIndex;
-		if (targetIndex !== undefined && targetIndex !== newSlideIndex) {
+		if (targetIndex !== undefined && targetIndex !== toOneBasedSlideIndex(newSlideIndex)) {
 			finalIndex = Math.max(
 				0,
-				Math.min(targetIndex, pres.slides.items.length - 1),
+				Math.min(toZeroBasedSlideIndex(targetIndex), pres.slides.items.length - 1),
 			);
 			newSlide.moveTo(finalIndex);
 			await ctx.sync();
@@ -2791,7 +2754,7 @@ async function handleDuplicateSlide(args: unknown): Promise<unknown> {
 
 		return {
 			sourceIndex: slideIndex,
-			newSlideIndex: finalIndex,
+			newSlideIndex: toOneBasedSlideIndex(finalIndex),
 			newSlideId,
 		};
 	});
@@ -2802,18 +2765,12 @@ async function handleDuplicateSlide(args: unknown): Promise<unknown> {
 // powerpoint_duplicate_slide targets a different instance.
 async function handleExportSlideInternal(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number };
-	const { slideIndex = 0 } = config;
+	const { slideIndex = 1 } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		if (slideIndex < 0 || slideIndex >= pres.slides.items.length) {
-			return { error: `Slide index ${slideIndex} out of range` };
-		}
-
-		const sourceSlide = pres.slides.items[slideIndex];
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide: sourceSlide } = resolved;
 		const exportResult = sourceSlide.exportAsBase64();
 		await ctx.sync();
 
@@ -2842,11 +2799,11 @@ async function handleImportSlideInternal(args: unknown): Promise<unknown> {
 		const beforeCount = pres.slides.items.length;
 
 		// Validate before mutating: once the slide is inserted the deck has beforeCount + 1
-		// slides, so valid target positions are 0..beforeCount inclusive (beforeCount itself
+		// slides, so valid target positions are 1..beforeCount+1 inclusive (beforeCount+1 itself
 		// means "append after the new last slide"). Checking this up front avoids leaving a
 		// stray imported slide behind when the request is rejected.
-		if (targetIndex !== undefined && (targetIndex < 0 || targetIndex > beforeCount)) {
-			return { error: `targetIndex ${targetIndex} out of range (target deck has ${beforeCount} slides; valid range is 0-${beforeCount})` };
+		if (targetIndex !== undefined && (targetIndex < 1 || targetIndex > beforeCount + 1)) {
+			return { error: `targetIndex ${targetIndex} out of range (target deck has ${beforeCount} slides; valid range is 1-${beforeCount + 1})` };
 		}
 
 		const options: any = {
@@ -2872,16 +2829,16 @@ async function handleImportSlideInternal(args: unknown): Promise<unknown> {
 		const newSlideId = safeStr(newSlide.id);
 
 		let finalIndex = newSlideIndex;
-		if (targetIndex !== undefined && targetIndex !== newSlideIndex) {
+		if (targetIndex !== undefined && targetIndex !== toOneBasedSlideIndex(newSlideIndex)) {
 			finalIndex = Math.max(
 				0,
-				Math.min(targetIndex, pres.slides.items.length - 1),
+				Math.min(toZeroBasedSlideIndex(targetIndex), pres.slides.items.length - 1),
 			);
 			newSlide.moveTo(finalIndex);
 			await ctx.sync();
 		}
 
-		return { newSlideIndex: finalIndex, newSlideId };
+		return { newSlideIndex: toOneBasedSlideIndex(finalIndex), newSlideId };
 	});
 }
 
@@ -2899,9 +2856,9 @@ async function handleGetTags(args: unknown): Promise<unknown> {
 		let tagTarget: any;
 
 		if (target === "slide" && slideIndex !== undefined) {
-			tagTarget = ctx.presentation.slides.getItemAt(slideIndex);
+			tagTarget = ctx.presentation.slides.getItemAt(toZeroBasedSlideIndex(slideIndex));
 		} else if (target === "shape" && slideIndex !== undefined && shapeId) {
-			const slide = ctx.presentation.slides.getItemAt(slideIndex);
+			const slide = ctx.presentation.slides.getItemAt(toZeroBasedSlideIndex(slideIndex));
 			tagTarget = slide.shapes.getItem(shapeId);
 		} else {
 			tagTarget = ctx.presentation;
@@ -2937,9 +2894,9 @@ async function handleSetTag(args: unknown): Promise<unknown> {
 		let tagTarget: any;
 
 		if (target === "slide" && slideIndex !== undefined) {
-			tagTarget = ctx.presentation.slides.getItemAt(slideIndex);
+			tagTarget = ctx.presentation.slides.getItemAt(toZeroBasedSlideIndex(slideIndex));
 		} else if (target === "shape" && slideIndex !== undefined && shapeId) {
-			const slide = ctx.presentation.slides.getItemAt(slideIndex);
+			const slide = ctx.presentation.slides.getItemAt(toZeroBasedSlideIndex(slideIndex));
 			tagTarget = slide.shapes.getItem(shapeId);
 		} else {
 			tagTarget = ctx.presentation;
@@ -3013,7 +2970,9 @@ async function handleSetShapeFill(args: unknown): Promise<unknown> {
 	} = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const slide = ctx.presentation.slides.getItemAt(slideIndex);
+		const slide = ctx.presentation.slides.getItemAt(
+			toZeroBasedSlideIndex(slideIndex),
+		);
 		const shape = slide.shapes.getItem(shapeId);
 		const fill = shape.fill;
 
@@ -3046,7 +3005,9 @@ async function handleSetShapeLine(args: unknown): Promise<unknown> {
 	const { slideIndex, shapeId, color, width, style, visible = true } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const slide = ctx.presentation.slides.getItemAt(slideIndex);
+		const slide = ctx.presentation.slides.getItemAt(
+			toZeroBasedSlideIndex(slideIndex),
+		);
 		const shape = slide.shapes.getItem(shapeId);
 		const line = shape.lineFormat;
 
@@ -3069,7 +3030,9 @@ async function handleSetShapeRotation(args: unknown): Promise<unknown> {
 	const { slideIndex, shapeId, degrees } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const slide = ctx.presentation.slides.getItemAt(slideIndex);
+		const slide = ctx.presentation.slides.getItemAt(
+			toZeroBasedSlideIndex(slideIndex),
+		);
 		const shape = slide.shapes.getItem(shapeId);
 		shape.rotation = degrees;
 		await ctx.sync();
@@ -3100,7 +3063,9 @@ async function handleAddGeometricShape(args: unknown): Promise<unknown> {
 
 	return runInPowerPoint(async (ctx) => {
 		const PowerPoint: any = (window as any).PowerPoint;
-		const slide = ctx.presentation.slides.getItemAt(slideIndex);
+		const slide = ctx.presentation.slides.getItemAt(
+			toZeroBasedSlideIndex(slideIndex),
+		);
 		const shape = slide.shapes.addGeometricShape(
 			PowerPoint.GeometricShapeType[shapeType] || shapeType,
 			{ left, top, width, height },
@@ -3138,7 +3103,9 @@ async function handleAddLine(args: unknown): Promise<unknown> {
 
 	return runInPowerPoint(async (ctx) => {
 		const PowerPoint: any = (window as any).PowerPoint;
-		const slide = ctx.presentation.slides.getItemAt(slideIndex);
+		const slide = ctx.presentation.slides.getItemAt(
+			toZeroBasedSlideIndex(slideIndex),
+		);
 		const connector = PowerPoint.ConnectorType[connectorType] || connectorType;
 		const shape = slide.shapes.addLine(connector, {
 			left: startX,
@@ -3189,7 +3156,8 @@ async function handleInsertSlidesFromFile(args: unknown): Promise<unknown> {
 		if (insertAfterSlideIndex !== undefined) {
 			pres.slides.load("items");
 			await ctx.sync();
-			const targetSlide = pres.slides.items[insertAfterSlideIndex];
+			const targetSlide =
+				pres.slides.items[toZeroBasedSlideIndex(insertAfterSlideIndex)];
 			if (targetSlide) {
 				targetSlide.load("id");
 				await ctx.sync();
@@ -3200,7 +3168,7 @@ async function handleInsertSlidesFromFile(args: unknown): Promise<unknown> {
 		if (slideIndexes) {
 			options.sourceSlideIds = slideIndexes
 				.split(",")
-				.map((s: string) => s.trim());
+				.map((s: string) => String(toZeroBasedSlideIndex(parseInt(s.trim(), 10))));
 		}
 
 		pres.insertSlidesFromBase64(base64File, options);
@@ -3244,17 +3212,12 @@ async function handleGetLayouts(_args: unknown): Promise<unknown> {
 
 async function handleSetSlideLayout(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; layoutId: string; slideMasterId?: string };
-	const { slideIndex = 0, layoutId, slideMasterId } = config;
+	const { slideIndex = 1, layoutId, slideMasterId } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const pres = ctx.presentation;
-		pres.load("slides");
-		await ctx.sync();
-
-		const slideCount = pres.slides.items.length;
-		if (slideIndex < 0 || slideIndex >= slideCount) {
-			return { error: `Slide index ${slideIndex} out of range (deck has ${slideCount} slides)` };
-		}
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
 
 		let layoutObj: any;
 
@@ -3296,7 +3259,6 @@ async function handleSetSlideLayout(args: unknown): Promise<unknown> {
 			}
 		}
 
-		const slide = pres.slides.items[slideIndex];
 		slide.applyLayout(layoutObj);
 		await ctx.sync();
 
@@ -3356,7 +3318,9 @@ async function handleGroupShapes(args: unknown): Promise<unknown> {
 	const { slideIndex, shapeIds } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const slide = ctx.presentation.slides.getItemAt(slideIndex);
+		const slide = ctx.presentation.slides.getItemAt(
+			toZeroBasedSlideIndex(slideIndex),
+		);
 		const ids = shapeIds.split(",").map((s: string) => s.trim());
 		const shapes: any[] = [];
 		for (const id of ids) {
@@ -3381,7 +3345,9 @@ async function handleUngroupShape(args: unknown): Promise<unknown> {
 	const { slideIndex, shapeId } = config;
 
 	return runInPowerPoint(async (ctx) => {
-		const slide = ctx.presentation.slides.getItemAt(slideIndex);
+		const slide = ctx.presentation.slides.getItemAt(
+			toZeroBasedSlideIndex(slideIndex),
+		);
 		const shape = slide.shapes.getItem(shapeId);
 		shape.group.ungroup();
 		await ctx.sync();

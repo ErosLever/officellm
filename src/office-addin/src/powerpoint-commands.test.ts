@@ -227,12 +227,12 @@ describe("powerpoint_get_deck_outline", () => {
 		const result = (await processCommand(
 			"cmd-3b",
 			"powerpoint_get_deck_outline",
-			{ startSlide: 1, endSlide: 1 },
+			{ startSlide: 2, endSlide: 2 },
 		)) as any;
 
 		expect(result.totalSlides).toBe(3);
 		expect(result.slides).toHaveLength(1);
-		expect(result.slides[0].index).toBe(1);
+		expect(result.slides[0].index).toBe(2);
 		expect(result.slides[0].title).toBe("Pricing Table");
 	});
 
@@ -240,18 +240,18 @@ describe("powerpoint_get_deck_outline", () => {
 		const result = (await processCommand(
 			"cmd-3c",
 			"powerpoint_get_deck_outline",
-			{ startSlide: 2, endSlide: 99 },
+			{ startSlide: 3, endSlide: 99 },
 		)) as any;
 
 		expect(result.slides).toHaveLength(1);
-		expect(result.slides[0].index).toBe(2);
+		expect(result.slides[0].index).toBe(3);
 	});
 
 	it("errors when startSlide is after endSlide", async () => {
 		const result = (await processCommand(
 			"cmd-3d",
 			"powerpoint_get_deck_outline",
-			{ startSlide: 2, endSlide: 0 },
+			{ startSlide: 3, endSlide: 1 },
 		)) as any;
 
 		expect(result.error).toBeDefined();
@@ -261,10 +261,10 @@ describe("powerpoint_get_deck_outline", () => {
 describe("powerpoint_get_slide", () => {
 	it("returns full shape properties for a slide", async () => {
 		const result = (await processCommand("cmd-4", "powerpoint_get_slide", {
-			slideIndex: 0,
+			slideIndex: 1,
 		})) as any;
 
-		expect(result.slideIndex).toBe(0);
+		expect(result.slideIndex).toBe(1);
 		expect(result.shapes).toHaveLength(5);
 
 		const title = result.shapes[0];
@@ -281,7 +281,7 @@ describe("powerpoint_get_slide", () => {
 
 	it("reports an empty layout when no layout has been applied", async () => {
 		const result = (await processCommand("cmd-4b", "powerpoint_get_slide", {
-			slideIndex: 0,
+			slideIndex: 1,
 		})) as any;
 
 		expect(result.layout).toEqual({ id: "", name: "" });
@@ -289,12 +289,12 @@ describe("powerpoint_get_slide", () => {
 
 	it("reflects the layout applied via powerpoint_set_slide_layout", async () => {
 		await processCommand("cmd-4c", "powerpoint_set_slide_layout", {
-			slideIndex: 0,
+			slideIndex: 1,
 			layoutId: "layout_1",
 		});
 
 		const result = (await processCommand("cmd-4d", "powerpoint_get_slide", {
-			slideIndex: 0,
+			slideIndex: 1,
 		})) as any;
 
 		expect(result.layout).toEqual({ id: "layout_1", name: "Title and Content" });
@@ -302,7 +302,7 @@ describe("powerpoint_get_slide", () => {
 
 	it("includes font properties for text shapes", async () => {
 		const result = (await processCommand("cmd-5", "powerpoint_get_slide", {
-			slideIndex: 0,
+			slideIndex: 1,
 		})) as any;
 		const title = result.shapes[0];
 
@@ -371,7 +371,7 @@ describe("powerpoint_get_slide", () => {
 		mockBridge.reportResult = mock.mockReportResult;
 
 		const result = (await processCommand("cmd-6b", "powerpoint_get_slide", {
-			slideIndex: 0,
+			slideIndex: 1,
 		})) as any;
 
 		expect(result.shapes[0].font.size).toBe(35);
@@ -421,7 +421,7 @@ describe("powerpoint_get_slide", () => {
 		mockBridge.reportResult = mock.mockReportResult;
 
 		const result = (await processCommand("cmd-6c", "powerpoint_get_slide", {
-			slideIndex: 0,
+			slideIndex: 1,
 		})) as any;
 
 		expect(result.shapes[0].font.size).toBe(0);
@@ -485,7 +485,7 @@ describe("powerpoint_get_slide", () => {
 		mockBridge.reportResult = mock.mockReportResult;
 
 		const result = (await processCommand("cmd-6e", "powerpoint_get_slide", {
-			slideIndex: 0,
+			slideIndex: 1,
 		})) as any;
 
 		expect(result.shapes[0].font.size).toBe(35);
@@ -497,10 +497,10 @@ describe("powerpoint_get_slide_image", () => {
 		const result = (await processCommand(
 			"cmd-7",
 			"powerpoint_get_slide_image",
-			{ slideIndex: 0 },
+			{ slideIndex: 1 },
 		)) as any;
 
-		expect(result.slideIndex).toBe(0);
+		expect(result.slideIndex).toBe(1);
 		expect(result.image).toMatch(/^data:image\/png;base64,/);
 	});
 });
@@ -510,10 +510,10 @@ describe("powerpoint_get_shape_image", () => {
 		const result = (await processCommand(
 			"cmd-8",
 			"powerpoint_get_shape_image",
-			{ slideIndex: 0, shapeId: "s3" },
+			{ slideIndex: 1, shapeId: "s3" },
 		)) as any;
 
-		expect(result.slideIndex).toBe(0);
+		expect(result.slideIndex).toBe(1);
 		expect(result.shapeId).toBe("s3");
 		expect(result.image).toMatch(/^data:image\/png;base64,/);
 	});
@@ -522,7 +522,7 @@ describe("powerpoint_get_shape_image", () => {
 		const result = (await processCommand(
 			"cmd-9",
 			"powerpoint_get_shape_image",
-			{ slideIndex: 0, shapeId: "nonexistent" },
+			{ slideIndex: 1, shapeId: "nonexistent" },
 		)) as any;
 		expect(result.error).toContain("not found");
 	});
@@ -531,7 +531,7 @@ describe("powerpoint_get_shape_image", () => {
 describe("powerpoint_get_table", () => {
 	it("returns table cells as 2D array", async () => {
 		const result = (await processCommand("cmd-10", "powerpoint_get_table", {
-			slideIndex: 1,
+			slideIndex: 2,
 			shapeId: "s6",
 		})) as any;
 
@@ -544,7 +544,7 @@ describe("powerpoint_get_table", () => {
 
 	it("returns error for missing shape", async () => {
 		const result = (await processCommand("cmd-11", "powerpoint_get_table", {
-			slideIndex: 1,
+			slideIndex: 2,
 			shapeId: "nope",
 		})) as any;
 		expect(result.error).toContain("not found");
@@ -556,7 +556,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp1",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(result.fullText).toBe("Alpha\rBeta\rGamma\rDelta\rEpsilon");
@@ -575,7 +575,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp2",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		const [p0, p1, p2, p3, p4] = result.paragraphs;
@@ -590,7 +590,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp3",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		const group0 = result.propertyGroups.find(
@@ -603,7 +603,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp4",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		const group1 = result.propertyGroups.find(
@@ -618,7 +618,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp5",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		const group3 = result.propertyGroups.find(
@@ -631,7 +631,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp6",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(result.paragraphs.map((p: any) => p.text)).toEqual([
@@ -649,7 +649,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp7",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "nope" },
+			{ slideIndex: 1, shapeId: "nope" },
 		)) as any;
 		expect(result.error).toContain("not found");
 	});
@@ -658,7 +658,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp8",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s3" }, // s3 is an Image
+			{ slideIndex: 1, shapeId: "s3" }, // s3 is an Image
 		)) as any;
 		expect(result.error).toContain("does not support text");
 	});
@@ -696,7 +696,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp9",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "sE" },
+			{ slideIndex: 1, shapeId: "sE" },
 		)) as any;
 
 		expect(result.defaultProperties.paragraphFormat).toMatchObject({
@@ -755,7 +755,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp10",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "sTitle" },
+			{ slideIndex: 1, shapeId: "sTitle" },
 		)) as any;
 
 		expect(result.defaultProperties.font.fontSize).toBe(35);
@@ -809,7 +809,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp11",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "sTitle" },
+			{ slideIndex: 1, shapeId: "sTitle" },
 		)) as any;
 
 		expect(result.defaultProperties.font.fontSize).toBe(0);
@@ -872,7 +872,7 @@ describe("powerpoint_get_shape_paragraphs", () => {
 		const result = (await processCommand(
 			"cmd-gp12",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "sTitle" },
+			{ slideIndex: 1, shapeId: "sTitle" },
 		)) as any;
 
 		expect(result.defaultProperties.font.fontSize).toBe(35);
@@ -888,7 +888,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md1",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(result.markdown).toBe(
@@ -900,7 +900,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md2",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "s7", bulletChar: "*" },
+			{ slideIndex: 1, shapeId: "s7", bulletChar: "*" },
 		)) as any;
 
 		expect(result.markdown.split("\n")[0]).toBe("* Alpha");
@@ -910,7 +910,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md3",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "s7", bulletChar: "+" },
+			{ slideIndex: 1, shapeId: "s7", bulletChar: "+" },
 		)) as any;
 
 		expect(result.error).toContain("bulletChar");
@@ -947,7 +947,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md4",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "sN" },
+			{ slideIndex: 1, shapeId: "sN" },
 		)) as any;
 
 		expect(result.markdown).toBe(
@@ -959,7 +959,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md5",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "nope" },
+			{ slideIndex: 1, shapeId: "nope" },
 		)) as any;
 		expect(result.error).toContain("not found");
 	});
@@ -968,7 +968,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md6",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "s3" },
+			{ slideIndex: 1, shapeId: "s3" },
 		)) as any;
 		expect(result.error).toContain("does not support text");
 	});
@@ -999,7 +999,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 			const result = (await processCommand(
 				"cmd-md-style",
 				"powerpoint_get_shape_text_markdown",
-				{ slideIndex: 0, shapeId: "sStyled" },
+				{ slideIndex: 1, shapeId: "sStyled" },
 			)) as any;
 
 			expect(result.markdown).toBe(
@@ -1041,7 +1041,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md-switch",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "sSwitch" },
+			{ slideIndex: 1, shapeId: "sSwitch" },
 		)) as any;
 
 		expect(result.markdown).toBe(["a. One", "b. Two", "i. Three"].join("\n"));
@@ -1075,7 +1075,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md-fallback",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "sUnsupported" },
+			{ slideIndex: 1, shapeId: "sUnsupported" },
 		)) as any;
 
 		expect(result.markdown).toBe(["1. One", "2. Two"].join("\n"));
@@ -1112,7 +1112,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-md-inline",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "sInline" },
+			{ slideIndex: 1, shapeId: "sInline" },
 		)) as any;
 
 		expect(result.markdown).toBe("- say *hello* _world_ now");
@@ -1226,7 +1226,7 @@ describe("powerpoint_get_slide_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-sm1",
 			"powerpoint_get_slide_text_markdown",
-			{ slideIndex: 0 },
+			{ slideIndex: 1 },
 		)) as any;
 
 		const blocks = result.markdown.split("\n\n");
@@ -1242,7 +1242,7 @@ describe("powerpoint_get_slide_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-sm2",
 			"powerpoint_get_slide_text_markdown",
-			{ slideIndex: 0 },
+			{ slideIndex: 1 },
 		)) as any;
 
 		expect(result.markdown).not.toContain("undefined");
@@ -1253,7 +1253,7 @@ describe("powerpoint_get_slide_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-sm3",
 			"powerpoint_get_slide_text_markdown",
-			{ slideIndex: 0, bulletChar: "*" },
+			{ slideIndex: 1, bulletChar: "*" },
 		)) as any;
 
 		expect(result.markdown).toContain("* Revenue grew 15%");
@@ -1263,7 +1263,7 @@ describe("powerpoint_get_slide_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-sm4",
 			"powerpoint_get_slide_text_markdown",
-			{ slideIndex: 0, bulletChar: "+" },
+			{ slideIndex: 1, bulletChar: "+" },
 		)) as any;
 
 		expect(result.error).toContain("bulletChar");
@@ -1312,7 +1312,7 @@ describe("powerpoint_get_slide_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-sm7",
 			"powerpoint_get_slide_text_markdown",
-			{ slideIndex: 0 },
+			{ slideIndex: 1 },
 		)) as any;
 
 		expect(result.markdown).not.toContain("[^1]");
@@ -1322,7 +1322,7 @@ describe("powerpoint_get_slide_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-sm6",
 			"powerpoint_get_slide_text_markdown",
-			{ slideIndex: 2 },
+			{ slideIndex: 3 },
 		)) as any;
 
 		expect(result.markdown).toBe("");
@@ -1377,7 +1377,7 @@ describe("powerpoint_get_slide_text_markdown", () => {
 		const result = (await processCommand(
 			"cmd-sm8",
 			"powerpoint_get_slide_text_markdown",
-			{ slideIndex: 0 },
+			{ slideIndex: 1 },
 		)) as any;
 
 		expect(result.markdown).toBe("# Third parties: CVEs");
@@ -1400,7 +1400,7 @@ describe("powerpoint_get_speaker_notes", () => {
 		const result = (await processCommand(
 			"cmd-13",
 			"powerpoint_get_speaker_notes",
-			{ slideIndex: 0 },
+			{ slideIndex: 1 },
 		)) as any;
 		expect(result.notes).toHaveLength(1);
 		expect(result.notes[0].notes).toBe("Talk about revenue growth");
@@ -1410,7 +1410,7 @@ describe("powerpoint_get_speaker_notes", () => {
 		const result = (await processCommand(
 			"cmd-14",
 			"powerpoint_get_speaker_notes",
-			{ slideIndex: 1 },
+			{ slideIndex: 2 },
 		)) as any;
 		expect(result.notes[0].notes).toBe("");
 	});
@@ -1424,7 +1424,7 @@ describe("powerpoint_update_shape_text", () => {
 			"cmd-15",
 			"powerpoint_update_shape_text",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s1",
 				text: "Q4 Results",
 			},
@@ -1439,7 +1439,7 @@ describe("powerpoint_update_shape_text", () => {
 			"cmd-16",
 			"powerpoint_update_shape_text",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "nope",
 				text: "test",
 			},
@@ -1453,7 +1453,7 @@ describe("powerpoint_update_shape_text", () => {
 			"cmd-17",
 			"powerpoint_update_shape_text",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s3",
 				text: "test", // s3 is an Image
 			},
@@ -1469,7 +1469,7 @@ describe("powerpoint_update_shape_properties", () => {
 			"cmd-18",
 			"powerpoint_update_shape_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s1",
 				left: 100,
 				top: 50,
@@ -1485,7 +1485,7 @@ describe("powerpoint_update_shape_properties", () => {
 			"cmd-19",
 			"powerpoint_update_shape_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s1",
 				fontSize: 48,
 				bold: true,
@@ -1501,7 +1501,7 @@ describe("powerpoint_update_shape_properties", () => {
 			"cmd-19b",
 			"powerpoint_update_shape_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s1",
 				underline: "Single",
 				strikethrough: true,
@@ -1519,7 +1519,7 @@ describe("powerpoint_update_shape_properties", () => {
 			"cmd-19c",
 			"powerpoint_update_shape_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s1",
 				bulletType: "Numbered",
 				bulletVisible: true,
@@ -1539,7 +1539,7 @@ describe("powerpoint_update_shape_properties", () => {
 			"cmd-19d",
 			"powerpoint_update_shape_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s1",
 				textMarginTop: 10,
 				wordWrap: false,
@@ -1557,7 +1557,7 @@ describe("powerpoint_update_shape_properties", () => {
 			"cmd-19e",
 			"powerpoint_update_shape_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s3",
 				bulletType: "Numbered",
 				underline: "Single",
@@ -1574,7 +1574,7 @@ describe("powerpoint_update_text_range_properties", () => {
 		const before = (await processCommand(
 			"cmd-utr-setup",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		const p2 = before.paragraphs[2]; // "Gamma", starts in the default group
 
@@ -1582,7 +1582,7 @@ describe("powerpoint_update_text_range_properties", () => {
 			"cmd-utr1",
 			"powerpoint_update_text_range_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s7",
 				start: p2.start,
 				length: p2.length,
@@ -1598,7 +1598,7 @@ describe("powerpoint_update_text_range_properties", () => {
 		const after = (await processCommand(
 			"cmd-utr-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		// Only paragraph 2's group changed; its siblings (0, 4) stay grouped together.
@@ -1619,7 +1619,7 @@ describe("powerpoint_update_text_range_properties", () => {
 			"cmd-utr2",
 			"powerpoint_update_text_range_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s7",
 				start: 0,
 				length: 5, // "Alpha"
@@ -1636,7 +1636,7 @@ describe("powerpoint_update_text_range_properties", () => {
 			"cmd-utr3",
 			"powerpoint_update_text_range_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s7",
 				start: 0,
 				length: 9999,
@@ -1652,7 +1652,7 @@ describe("powerpoint_update_text_range_properties", () => {
 			"cmd-utr4",
 			"powerpoint_update_text_range_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "s3", // s3 is an Image
 				start: 0,
 				length: 1,
@@ -1668,7 +1668,7 @@ describe("powerpoint_update_text_range_properties", () => {
 			"cmd-utr5",
 			"powerpoint_update_text_range_properties",
 			{
-				slideIndex: 0,
+				slideIndex: 1,
 				shapeId: "nope",
 				start: 0,
 				length: 1,
@@ -1683,7 +1683,7 @@ describe("powerpoint_update_text_range_properties", () => {
 describe("powerpoint_insert_paragraph", () => {
 	it("inserts at the start, shifting every existing paragraph down by one", async () => {
 		const result = (await processCommand("cmd-ip1", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "Zero",
 			position: "start",
@@ -1696,7 +1696,7 @@ describe("powerpoint_insert_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-ip1-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
@@ -1711,7 +1711,7 @@ describe("powerpoint_insert_paragraph", () => {
 
 	it("inserts at the end, appending a new last paragraph", async () => {
 		const result = (await processCommand("cmd-ip2", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "Zeta",
 			position: "end",
@@ -1720,7 +1720,7 @@ describe("powerpoint_insert_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-ip2-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
@@ -1739,12 +1739,12 @@ describe("powerpoint_insert_paragraph", () => {
 		const before = (await processCommand(
 			"cmd-ip3-setup",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		const gamma = before.paragraphs[2]; // "Gamma"
 
 		await processCommand("cmd-ip3", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "Middle",
 			position: "before",
@@ -1756,7 +1756,7 @@ describe("powerpoint_insert_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-ip3-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
@@ -1775,7 +1775,7 @@ describe("powerpoint_insert_paragraph", () => {
 
 	it("applies inline formatting to the newly inserted paragraph only", async () => {
 		const result = (await processCommand("cmd-ip4", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "Styled",
 			position: "end",
@@ -1789,7 +1789,7 @@ describe("powerpoint_insert_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-ip4-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		const newParagraph = after.paragraphs[after.paragraphs.length - 1];
@@ -1807,12 +1807,12 @@ describe("powerpoint_insert_paragraph", () => {
 		const before = (await processCommand(
 			"cmd-ip5-setup",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		const delta = before.paragraphs[3]; // "Delta", has a distinct font color override
 
 		const result = (await processCommand("cmd-ip5", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "AfterDelta",
 			position: "after",
@@ -1825,7 +1825,7 @@ describe("powerpoint_insert_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-ip5-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		const newParagraph = after.paragraphs[4];
@@ -1835,7 +1835,7 @@ describe("powerpoint_insert_paragraph", () => {
 
 	it("returns error when refParagraphStart/refParagraphLength are out of range", async () => {
 		const result = (await processCommand("cmd-ip6", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "X",
 			position: "after",
@@ -1848,7 +1848,7 @@ describe("powerpoint_insert_paragraph", () => {
 
 	it("returns error when refParagraphText does not match the current text at the reference range", async () => {
 		const result = (await processCommand("cmd-ip7", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "X",
 			position: "before",
@@ -1862,7 +1862,7 @@ describe("powerpoint_insert_paragraph", () => {
 
 	it("returns error for shape with no text frame", async () => {
 		const result = (await processCommand("cmd-ip8", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s3", // s3 is an Image
 			text: "X",
 			position: "end",
@@ -1873,7 +1873,7 @@ describe("powerpoint_insert_paragraph", () => {
 
 	it("returns error for missing shape", async () => {
 		const result = (await processCommand("cmd-ip9", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "nope",
 			text: "X",
 			position: "end",
@@ -1884,7 +1884,7 @@ describe("powerpoint_insert_paragraph", () => {
 
 	it("returns error for invalid position", async () => {
 		const result = (await processCommand("cmd-ip10", "powerpoint_insert_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "X",
 			position: "middle",
@@ -1899,12 +1899,12 @@ describe("powerpoint_delete_paragraph", () => {
 		const before = (await processCommand(
 			"cmd-dp1-setup",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		const beta = before.paragraphs[1]; // "Beta", has a distinct indentLevel override
 
 		const result = (await processCommand("cmd-dp1", "powerpoint_delete_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			paragraphStart: beta.start,
 			paragraphLength: beta.length,
@@ -1916,7 +1916,7 @@ describe("powerpoint_delete_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-dp1-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
@@ -1937,12 +1937,12 @@ describe("powerpoint_delete_paragraph", () => {
 		const before = (await processCommand(
 			"cmd-dp2-setup",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		const alpha = before.paragraphs[0];
 
 		await processCommand("cmd-dp2", "powerpoint_delete_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			paragraphStart: alpha.start,
 			paragraphLength: alpha.length,
@@ -1951,7 +1951,7 @@ describe("powerpoint_delete_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-dp2-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
@@ -1966,12 +1966,12 @@ describe("powerpoint_delete_paragraph", () => {
 		const before = (await processCommand(
 			"cmd-dp3-setup",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		const epsilon = before.paragraphs[4];
 
 		await processCommand("cmd-dp3", "powerpoint_delete_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			paragraphStart: epsilon.start,
 			paragraphLength: epsilon.length,
@@ -1980,7 +1980,7 @@ describe("powerpoint_delete_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-dp3-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(after.paragraphs.map((p: any) => p.text)).toEqual([
@@ -1993,13 +1993,13 @@ describe("powerpoint_delete_paragraph", () => {
 
 	it("empties the text when deleting the only remaining paragraph", async () => {
 		await processCommand("cmd-dp4a", "powerpoint_update_shape_text", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			text: "Solo",
 		});
 
 		await processCommand("cmd-dp4", "powerpoint_delete_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			paragraphStart: 0,
 			paragraphLength: 4,
@@ -2008,7 +2008,7 @@ describe("powerpoint_delete_paragraph", () => {
 		const after = (await processCommand(
 			"cmd-dp4-verify",
 			"powerpoint_get_shape_paragraphs",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 
 		expect(after.paragraphs.map((p: any) => p.text)).toEqual([""]);
@@ -2016,7 +2016,7 @@ describe("powerpoint_delete_paragraph", () => {
 
 	it("returns error when start/length are out of range", async () => {
 		const result = (await processCommand("cmd-dp5", "powerpoint_delete_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			paragraphStart: 0,
 			paragraphLength: 9999,
@@ -2027,7 +2027,7 @@ describe("powerpoint_delete_paragraph", () => {
 
 	it("returns error when expectedText does not match the current text at the range", async () => {
 		const result = (await processCommand("cmd-dp6", "powerpoint_delete_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			paragraphStart: 0,
 			paragraphLength: 5,
@@ -2039,7 +2039,7 @@ describe("powerpoint_delete_paragraph", () => {
 
 	it("returns error for shape with no text frame", async () => {
 		const result = (await processCommand("cmd-dp7", "powerpoint_delete_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s3", // s3 is an Image
 			paragraphStart: 0,
 			paragraphLength: 1,
@@ -2050,7 +2050,7 @@ describe("powerpoint_delete_paragraph", () => {
 
 	it("returns error for missing shape", async () => {
 		const result = (await processCommand("cmd-dp8", "powerpoint_delete_paragraph", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "nope",
 			paragraphStart: 0,
 			paragraphLength: 1,
@@ -2071,14 +2071,14 @@ describe("powerpoint_set_shape_text_markdown", () => {
 			const setResult = (await processCommand(
 				"cmd-smd-set",
 				"powerpoint_set_shape_text_markdown",
-				{ slideIndex: 0, shapeId: "s7", markdown },
+				{ slideIndex: 1, shapeId: "s7", markdown },
 			)) as any;
 			expect(setResult.paragraphCount).toBe(3);
 
 			const getResult = (await processCommand(
 				"cmd-smd-get",
 				"powerpoint_get_shape_text_markdown",
-				{ slideIndex: 0, shapeId: "s7" },
+				{ slideIndex: 1, shapeId: "s7" },
 			)) as any;
 			expect(getResult.markdown).toBe(markdown);
 		},
@@ -2088,7 +2088,7 @@ describe("powerpoint_set_shape_text_markdown", () => {
 		const markdown = ["- One", "* Two"].join("\n");
 
 		await processCommand("cmd-smd-un-set", "powerpoint_set_shape_text_markdown", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			markdown,
 		});
@@ -2096,7 +2096,7 @@ describe("powerpoint_set_shape_text_markdown", () => {
 		const getResult = (await processCommand(
 			"cmd-smd-un-get",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		expect(getResult.markdown).toBe(["- One", "- Two"].join("\n"));
 	});
@@ -2105,7 +2105,7 @@ describe("powerpoint_set_shape_text_markdown", () => {
 		const markdown = ["1. One", "  a. Two", "    i. Three", "    ii. Four"].join("\n");
 
 		await processCommand("cmd-smd-indent-set", "powerpoint_set_shape_text_markdown", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			markdown,
 		});
@@ -2113,7 +2113,7 @@ describe("powerpoint_set_shape_text_markdown", () => {
 		const getResult = (await processCommand(
 			"cmd-smd-indent-get",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		expect(getResult.markdown).toBe(markdown);
 	});
@@ -2122,7 +2122,7 @@ describe("powerpoint_set_shape_text_markdown", () => {
 		const markdown = "- say *hello* _world_ now";
 
 		await processCommand("cmd-smd-inline-set", "powerpoint_set_shape_text_markdown", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s7",
 			markdown,
 		});
@@ -2130,14 +2130,14 @@ describe("powerpoint_set_shape_text_markdown", () => {
 		const getResult = (await processCommand(
 			"cmd-smd-inline-get",
 			"powerpoint_get_shape_text_markdown",
-			{ slideIndex: 0, shapeId: "s7" },
+			{ slideIndex: 1, shapeId: "s7" },
 		)) as any;
 		expect(getResult.markdown).toBe(markdown);
 	});
 
 	it("returns error for missing shape, without mutating", async () => {
 		const result = (await processCommand("cmd-smd-nf", "powerpoint_set_shape_text_markdown", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "nope",
 			markdown: "1. One",
 		})) as any;
@@ -2147,7 +2147,7 @@ describe("powerpoint_set_shape_text_markdown", () => {
 
 	it("returns error for shape with no text frame", async () => {
 		const result = (await processCommand("cmd-smd-notf", "powerpoint_set_shape_text_markdown", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s3", // s3 is an Image
 			markdown: "1. One",
 		})) as any;
@@ -2410,7 +2410,7 @@ describe("powerpoint_update_speaker_notes", () => {
 describe("powerpoint_add_textbox", () => {
 	it("creates a new text box", async () => {
 		const result = (await processCommand("cmd-21", "powerpoint_add_textbox", {
-			slideIndex: 0,
+			slideIndex: 1,
 			text: "Hello!",
 			left: 100,
 			top: 200,
@@ -2418,7 +2418,7 @@ describe("powerpoint_add_textbox", () => {
 			height: 50,
 		})) as any;
 
-		expect(result.slideIndex).toBe(0);
+		expect(result.slideIndex).toBe(1);
 		expect(result.name).toBeTruthy();
 		expect(mock.data.slides[0].shapes).toHaveLength(6); // was 5
 	});
@@ -2427,13 +2427,13 @@ describe("powerpoint_add_textbox", () => {
 describe("powerpoint_add_image", () => {
 	it("creates a new image shape", async () => {
 		const result = (await processCommand("cmd-22", "powerpoint_add_image", {
-			slideIndex: 0,
+			slideIndex: 1,
 			imageBase64: "data:image/png;base64,abc123",
 			left: 100,
 			top: 200,
 		})) as any;
 
-		expect(result.slideIndex).toBe(0);
+		expect(result.slideIndex).toBe(1);
 		expect(result.name).toBeTruthy();
 	});
 });
@@ -2441,14 +2441,14 @@ describe("powerpoint_add_image", () => {
 describe("powerpoint_add_table", () => {
 	it("creates a new table shape", async () => {
 		const result = (await processCommand("cmd-23", "powerpoint_add_table", {
-			slideIndex: 0,
+			slideIndex: 1,
 			rows: 3,
 			columns: 4,
 			left: 100,
 			top: 200,
 		})) as any;
 
-		expect(result.slideIndex).toBe(0);
+		expect(result.slideIndex).toBe(1);
 		expect(result.name).toBeTruthy();
 	});
 });
@@ -2456,7 +2456,7 @@ describe("powerpoint_add_table", () => {
 describe("powerpoint_delete_shape", () => {
 	it("removes a shape from the slide", async () => {
 		const result = (await processCommand("cmd-24", "powerpoint_delete_shape", {
-			slideIndex: 0,
+			slideIndex: 1,
 			shapeId: "s2",
 		})) as any;
 
@@ -2474,16 +2474,16 @@ describe("powerpoint_add_slide", () => {
 			{},
 		)) as any;
 
-		expect(result.slideIndex).toBe(3);
+		expect(result.slideIndex).toBe(4);
 		expect(mock.data.slides).toHaveLength(4); // was 3
 	});
 
 	it("adds a new slide at specific index", async () => {
 		const result = (await processCommand("cmd-26", "powerpoint_add_slide", {
-			atIndex: 1,
+			atIndex: 2,
 		})) as any;
 
-		expect(result.slideIndex).toBe(1);
+		expect(result.slideIndex).toBe(2);
 		expect(mock.data.slides).toHaveLength(4);
 	});
 
@@ -2492,7 +2492,7 @@ describe("powerpoint_add_slide", () => {
 			layoutId: "layout_1",
 		})) as any;
 
-		expect(result.slideIndex).toBe(3);
+		expect(result.slideIndex).toBe(4);
 		expect(mock.data.slides[3].layoutId).toBe("layout_1");
 	});
 
@@ -2528,11 +2528,11 @@ describe("powerpoint_set_slide_layout", () => {
 		const result = (await processCommand(
 			"cmd-layout-1",
 			"powerpoint_set_slide_layout",
-			{ slideIndex: 0, layoutId: "layout_1" },
+			{ slideIndex: 1, layoutId: "layout_1" },
 		)) as any;
 
 		expect(result.applied).toBe(true);
-		expect(result.slideIndex).toBe(0);
+		expect(result.slideIndex).toBe(1);
 		expect(result.layoutId).toBe("layout_1");
 		expect(mock.data.slides[0].layoutId).toBe("layout_1");
 	});
@@ -2541,7 +2541,7 @@ describe("powerpoint_set_slide_layout", () => {
 		const result = (await processCommand(
 			"cmd-layout-2",
 			"powerpoint_set_slide_layout",
-			{ slideIndex: 1, layoutId: "layout_2", slideMasterId: "master_0" },
+			{ slideIndex: 2, layoutId: "layout_2", slideMasterId: "master_0" },
 		)) as any;
 
 		expect(result.applied).toBe(true);
@@ -2553,7 +2553,7 @@ describe("powerpoint_set_slide_layout", () => {
 		const result = (await processCommand(
 			"cmd-layout-3",
 			"powerpoint_set_slide_layout",
-			{ slideIndex: 0, layoutId: "nonexistent_layout" },
+			{ slideIndex: 1, layoutId: "nonexistent_layout" },
 		)) as any;
 
 		expect(result.error).toContain("not found");
@@ -2563,7 +2563,7 @@ describe("powerpoint_set_slide_layout", () => {
 		const result = (await processCommand(
 			"cmd-layout-4",
 			"powerpoint_set_slide_layout",
-			{ slideIndex: 0, layoutId: "layout_0", slideMasterId: "nonexistent_master" },
+			{ slideIndex: 1, layoutId: "layout_0", slideMasterId: "nonexistent_master" },
 		)) as any;
 
 		expect(result.error).toContain("not found");
@@ -2593,12 +2593,12 @@ describe("powerpoint_delete_slide", () => {
 describe("powerpoint_move_slide", () => {
 	it("moves a slide to new position", async () => {
 		const result = (await processCommand("cmd-28", "powerpoint_move_slide", {
-			fromIndex: 0,
-			toIndex: 2,
+			fromIndex: 1,
+			toIndex: 3,
 		})) as any;
 
-		expect(result.fromIndex).toBe(0);
-		expect(result.toIndex).toBe(2);
+		expect(result.fromIndex).toBe(1);
+		expect(result.toIndex).toBe(3);
 	});
 });
 
@@ -2607,11 +2607,11 @@ describe("powerpoint_duplicate_slide", () => {
 		const result = (await processCommand(
 			"cmd-29",
 			"powerpoint_duplicate_slide",
-			{ slideIndex: 0 },
+			{ slideIndex: 1 },
 		)) as any;
 
-		expect(result.sourceIndex).toBe(0);
-		expect(result.newSlideIndex).toBe(1);
+		expect(result.sourceIndex).toBe(1);
+		expect(result.newSlideIndex).toBe(2);
 		expect(mock.data.slides).toHaveLength(4); // was 3
 	});
 
@@ -2619,11 +2619,11 @@ describe("powerpoint_duplicate_slide", () => {
 		const result = (await processCommand(
 			"cmd-30",
 			"powerpoint_duplicate_slide",
-			{ slideIndex: 0, targetIndex: 3 },
+			{ slideIndex: 1, targetIndex: 4 },
 		)) as any;
 
-		expect(result.sourceIndex).toBe(0);
-		expect(result.newSlideIndex).toBe(3);
+		expect(result.sourceIndex).toBe(1);
+		expect(result.newSlideIndex).toBe(4);
 		expect(mock.data.slides).toHaveLength(4);
 	});
 
@@ -2638,16 +2638,16 @@ describe("powerpoint_duplicate_slide", () => {
 	});
 
 	it("accepts targetIndex equal to slide count (append at end)", async () => {
-		// Deck starts with 3 slides; targetIndex == slideCount (3) means "append
+		// Deck starts with 3 slides; targetIndex == slideCount + 1 (4) means "append
 		// after the new last slide" once the duplicate is inserted — must be valid.
 		const result = (await processCommand(
 			"cmd-32",
 			"powerpoint_duplicate_slide",
-			{ slideIndex: 0, targetIndex: 3 },
+			{ slideIndex: 1, targetIndex: 4 },
 		)) as any;
 
 		expect(result.error).toBeUndefined();
-		expect(result.newSlideIndex).toBe(3);
+		expect(result.newSlideIndex).toBe(4);
 		expect(mock.data.slides).toHaveLength(4);
 	});
 
@@ -2655,7 +2655,7 @@ describe("powerpoint_duplicate_slide", () => {
 		const result = (await processCommand(
 			"cmd-33",
 			"powerpoint_duplicate_slide",
-			{ slideIndex: 0, targetIndex: 99 },
+			{ slideIndex: 1, targetIndex: 99 },
 		)) as any;
 
 		expect(result.error).toContain("out of range");
@@ -2667,7 +2667,7 @@ describe("powerpoint_duplicate_slide", () => {
 		const result = (await processCommand(
 			"cmd-34",
 			"powerpoint_duplicate_slide",
-			{ slideIndex: 0, targetIndex: -1 },
+			{ slideIndex: 1, targetIndex: -1 },
 		)) as any;
 
 		expect(result.error).toContain("out of range");
@@ -2691,7 +2691,7 @@ describe("powerpoint_import_slide_internal", () => {
 		const result = (await processCommand(
 			"cmd-36",
 			"powerpoint_import_slide_internal",
-			{ base64: "ZmFrZQ==", targetIndex: 3 },
+			{ base64: "ZmFrZQ==", targetIndex: 4 },
 		)) as any;
 
 		expect(result.error).toBeUndefined();

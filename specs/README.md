@@ -97,6 +97,8 @@ The instance registration (`POST /instances/register`) includes the `appName` fi
 | `outlook_summarize_thread`        | Outlook    | `instanceId?`                                                 |
 | `outlook_draft_reply`             | Outlook    | `instanceId?`, `tone`, `keyPoints`                            |
 
+`slideIndex` and other slide-index-shaped parameters (e.g. `atIndex`, `fromIndex`/`toIndex`, `targetIndex`) are 1-based, matching the slide numbers shown in the PowerPoint UI.
+
 ### Planned (Phases 8–12)
 
 | Tool                           | Host    | Phase | Scope                                    |
