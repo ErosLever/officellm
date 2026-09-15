@@ -1524,15 +1524,8 @@ async function handleInsertList(args: unknown): Promise<unknown> {
 		).ChangeTrackingMode.trackMineOnly;
 
 		const body = ctx.document.body;
-		const bulletType =
-			type === "numbered"
-				? (Word as any).BulletType.numbered
-				: (Word as any).BulletType.bulleted;
 
-		// Build list text
-		const listText = items.join("\r");
 		let insertRange: any;
-
 		if (afterParagraphIndex === -1) {
 			insertRange = body.getRange("End");
 		} else {
@@ -1545,21 +1538,33 @@ async function handleInsertList(args: unknown): Promise<unknown> {
 				].getRange("After");
 		}
 
-		insertRange.insertParagraph(listText, (Word as any).InsertLocation.after);
+		// Insert one paragraph per item, chaining off each returned Paragraph
+		let prevPara = insertRange.insertParagraph(
+			items[0],
+			(Word as any).InsertLocation.after,
+		);
+		await ctx.sync();
+		const paraItems = [prevPara];
+		for (let i = 1; i < items.length; i++) {
+			prevPara = prevPara.insertParagraph(
+				items[i],
+				(Word as any).InsertLocation.after,
+			);
+			await ctx.sync();
+			paraItems.push(prevPara);
+		}
+
+		const list = paraItems[0].startNewList();
+		if (type === "numbered") {
+			list.setLevelNumbering(0, (Word as any).ListNumbering.arabic);
+		} else {
+			list.setLevelBullet(0, (Word as any).ListBullet.solid);
+		}
+		list.load("id");
 		await ctx.sync();
 
-		// Apply list formatting to the inserted paragraph
-		const insertedPara = insertRange.paragraphs.getLast();
-		insertedPara.load("uniqueLocalId");
-		await ctx.sync();
-
-		// Split by \r and apply bullet/number formatting
-		const listItems = insertedPara.split(["\r"]);
-		listItems.load("items");
-		await ctx.sync();
-
-		for (const item of listItems.items) {
-			item.startList(bulletType);
+		for (let i = 1; i < paraItems.length; i++) {
+			paraItems[i].attachToList(list.id, 0);
 		}
 		await ctx.sync();
 
