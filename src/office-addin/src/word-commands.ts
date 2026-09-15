@@ -238,6 +238,14 @@ function runInWord<T>(fn: (ctx: any) => Promise<T>): Promise<T> {
 	});
 }
 
+// document.changeTrackingMode must be loaded before it can be read — reading it
+// unloaded throws "the property is not available" at the point of access.
+async function getChangeTrackingMode(ctx: any): Promise<any> {
+	ctx.document.load("changeTrackingMode");
+	await ctx.sync();
+	return ctx.document.changeTrackingMode;
+}
+
 // ── Read tools ──────────────────────────────────────────────────
 
 async function handleGetOutline(args: unknown): Promise<unknown> {
@@ -442,13 +450,30 @@ async function handleReplaceText(args: unknown): Promise<unknown> {
 			};
 		}
 
-		// Use search within the paragraph to do targeted replace
-		const searchResults = paragraph.search(oldText, { matchCase: true });
-		searchResults.load("items");
-		await ctx.sync();
+		// Word's Range.search() caps searchText at 255 characters
+		// (SearchStringInvalidOrTooLong beyond that) and applies its own
+		// native matching rules for special characters, which can silently
+		// fail to find text that a plain JS substring match finds fine.
+		// Prefer search() when it's usable (preserves formatting outside the
+		// match); fall back to rewriting the whole paragraph via JS string
+		// replace, which only needs oldText to exist as a substring.
+		let replacedViaSearch = false;
+		if (oldText.length <= 255) {
+			const searchResults = paragraph.search(oldText, { matchCase: true });
+			searchResults.load("items");
+			await ctx.sync();
+			if (searchResults.items.length > 0) {
+				searchResults.items[0].insertText(newText, "Replace");
+				await ctx.sync();
+				replacedViaSearch = true;
+			}
+		}
 
-		if (searchResults.items.length > 0) {
-			searchResults.items[0].insertText(newText, "Replace");
+		if (!replacedViaSearch) {
+			const matchIndex = currentText.indexOf(oldText);
+			const newFullText =
+				currentText.slice(0, matchIndex) + newText + currentText.slice(matchIndex + oldText.length);
+			paragraph.getRange("Whole").insertText(newFullText, "Replace");
 			await ctx.sync();
 		}
 
@@ -573,7 +598,7 @@ async function handleDeleteParagraph(args: unknown): Promise<unknown> {
 		}
 
 		// Enable tracked changes for this mutation
-		const savedMode = ctx.document.changeTrackingMode;
+		const savedMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = "TrackMineOnly";
 
 		const paragraph = paragraphs.items[paragraphIndex];
@@ -590,8 +615,7 @@ async function handleDeleteParagraph(args: unknown): Promise<unknown> {
 
 async function handleGetTrackedChanges(_args: unknown): Promise<unknown> {
 	return runInWord(async (ctx) => {
-		const mode = ctx.document.changeTrackingMode;
-		await ctx.sync();
+		const mode = await getChangeTrackingMode(ctx);
 
 		return {
 			changeTrackingMode: mode,
@@ -681,7 +705,7 @@ async function handleInsertTable(args: unknown): Promise<unknown> {
 	const { rows = 1, columns = 2, afterParagraphIndex = -1, headerRow } = config;
 
 	return runInWord(async (ctx) => {
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = (
 			Word as any
 		).ChangeTrackingMode.trackMineOnly;
@@ -733,7 +757,7 @@ async function handleUpdateTableCell(args: unknown): Promise<unknown> {
 	const { tableIndex = 0, row = 0, column = 0, text = "" } = config;
 
 	return runInWord(async (ctx) => {
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = (
 			Word as any
 		).ChangeTrackingMode.trackMineOnly;
@@ -1219,7 +1243,7 @@ async function handleSetHeaderFooter(args: unknown): Promise<unknown> {
 	} = config;
 
 	return runInWord(async (ctx) => {
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = (
 			Word as any
 		).ChangeTrackingMode.trackMineOnly;
@@ -1271,7 +1295,7 @@ async function handleReplaceSelection(args: unknown): Promise<unknown> {
 		}
 
 		const originalText = selection.text;
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = (
 			Word as any
 		).ChangeTrackingMode.trackMineOnly;
@@ -1466,7 +1490,7 @@ async function handleInsertList(args: unknown): Promise<unknown> {
 		return { error: "items must be non-empty", errorCode: "EMPTY_ITEMS" };
 
 	return runInWord(async (ctx) => {
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = (
 			Word as any
 		).ChangeTrackingMode.trackMineOnly;
@@ -1552,7 +1576,7 @@ async function handleFindReplace(args: unknown): Promise<unknown> {
 	const Word: any = (window as any).Word;
 
 	return runInWord(async (ctx: any) => {
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 
 		// Build search options
 		const searchOptions: any = {};
@@ -1792,7 +1816,7 @@ async function handleInsertHyperlink(args: unknown): Promise<unknown> {
 
 	return runInWord(async (ctx: any) => {
 		const Word: any = (window as any).Word;
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = Word.ChangeTrackingMode.trackMineOnly;
 
 		let range: any;
@@ -1824,7 +1848,7 @@ async function handleInsertFootnote(args: unknown): Promise<unknown> {
 	const config = args as { paragraphIndex: number; text: string };
 	return runInWord(async (ctx: any) => {
 		const Word: any = (window as any).Word;
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = Word.ChangeTrackingMode.trackMineOnly;
 
 		const paras = ctx.document.body.paragraphs;
@@ -1850,7 +1874,7 @@ async function handleInsertEndnote(args: unknown): Promise<unknown> {
 	const config = args as { paragraphIndex: number; text: string };
 	return runInWord(async (ctx: any) => {
 		const Word: any = (window as any).Word;
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = Word.ChangeTrackingMode.trackMineOnly;
 
 		const paras = ctx.document.body.paragraphs;
@@ -1878,7 +1902,7 @@ async function handleInsertField(args: unknown): Promise<unknown> {
 
 	return runInWord(async (ctx: any) => {
 		const Word: any = (window as any).Word;
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = Word.ChangeTrackingMode.trackMineOnly;
 
 		let range: any;
@@ -1953,7 +1977,7 @@ async function handleInsertContentControl(args: unknown): Promise<unknown> {
 
 	return runInWord(async (ctx: any) => {
 		const Word: any = (window as any).Word;
-		const originalMode = ctx.document.changeTrackingMode;
+		const originalMode = await getChangeTrackingMode(ctx);
 		ctx.document.changeTrackingMode = Word.ChangeTrackingMode.trackMineOnly;
 
 		const paras = ctx.document.body.paragraphs;

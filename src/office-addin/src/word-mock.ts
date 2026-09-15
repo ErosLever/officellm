@@ -171,6 +171,10 @@ class MockDocument {
 		this._changeTrackingMode = mode;
 	}
 
+	load(_props: string) {
+		// Mock properties are always synchronously available; nothing to queue.
+	}
+
 	getSelection() {
 		return new MockSelection(this._ctx, this._data);
 	}
