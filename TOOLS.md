@@ -108,11 +108,11 @@ PowerPoint has no comment tools. Unlike Word (`Word.Comment`/`CommentCollection`
 ### Write
 | Tool | Description |
 |---|---|
-| `word_replace_text` | Replaces text within a specific paragraph |
-| `word_insert_text` | Inserts text at end / before / after a paragraph |
+| `word_replace_text` | Replaces text within a specific paragraph. `trackChanges` (default `true`) wraps it as a tracked change, saving/restoring the document's prior tracking mode; pass `false` to mutate untracked |
+| `word_insert_text` | Inserts text at end / before / after a paragraph. `trackChanges` (default `true`) as above |
 | `word_replace_selection` | Replaces the current selection with new text |
-| `word_find_replace` | Find & replace with wildcards, case, whole-word, scoping |
-| `word_delete_paragraph` | Deletes a paragraph by index |
+| `word_find_replace` | Find & replace with wildcards, case, whole-word, scoping. `trackChanges` (default `true`) as above |
+| `word_delete_paragraph` | Deletes a paragraph by index. `trackChanges` (default `true`) as above |
 
 ### Tracked Changes
 | Tool | Description |
@@ -187,7 +187,7 @@ PowerPoint has no comment tools. Unlike Word (`Word.Comment`/`CommentCollection`
 ### Comments
 | Tool | Description |
 |---|---|
-| `word_get_comments` | All comment threads with replies and anchor text |
+| `word_get_comments` | All comment threads with replies, anchor text, and resolved `startParagraphIndex`/`endParagraphIndex` (plus `anchorStart`/`anchorEnd`/`localStart`/`localEnd`) so the anchored text can be located for edits (e.g. via `word_replace_text`) |
 | `word_add_comment` | Adds a comment anchored to text, paragraphs, or selection |
 | `word_edit_comment` | Edits a top-level comment's text |
 | `word_resolve_comment` | Resolves or reopens a comment thread |

@@ -709,7 +709,8 @@ public static class McpToolEngine
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
                     ["paragraphIndex"] = new { type = "integer", description = "Zero-based paragraph index" },
                     ["oldText"] = new { type = "string", description = "Text to find and replace within the paragraph" },
-                    ["newText"] = new { type = "string", description = "Replacement text" }
+                    ["newText"] = new { type = "string", description = "Replacement text" },
+                    ["trackChanges"] = new { type = "boolean", description = "Wrap the edit as a tracked change (saves and restores the document's prior change-tracking mode). Default: true.", @default = true }
                 },
                 required = new[] { "instanceId", "paragraphIndex", "oldText", "newText" }
             }
@@ -726,7 +727,8 @@ public static class McpToolEngine
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
                     ["text"] = new { type = "string", description = "Text to insert" },
                     ["insertLocation"] = new { type = "string", description = "Where to insert: 'end' (default), 'afterParagraph', 'beforeParagraph'", @default = "end" },
-                    ["paragraphIndex"] = new { type = "integer", description = "Zero-based paragraph index (required for afterParagraph/beforeParagraph)" }
+                    ["paragraphIndex"] = new { type = "integer", description = "Zero-based paragraph index (required for afterParagraph/beforeParagraph)" },
+                    ["trackChanges"] = new { type = "boolean", description = "Wrap the edit as a tracked change (saves and restores the document's prior change-tracking mode). Default: true.", @default = true }
                 },
                 required = new[] { "instanceId", "text" }
             }
@@ -760,7 +762,8 @@ public static class McpToolEngine
                 properties = new Dictionary<string, object>
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
-                    ["paragraphIndex"] = new { type = "integer", description = "Zero-based paragraph index to delete" }
+                    ["paragraphIndex"] = new { type = "integer", description = "Zero-based paragraph index to delete" },
+                    ["trackChanges"] = new { type = "boolean", description = "Wrap the deletion as a tracked change (saves and restores the document's prior change-tracking mode). Default: true.", @default = true }
                 },
                 required = new[] { "instanceId", "paragraphIndex" }
             }
@@ -1040,7 +1043,7 @@ public static class McpToolEngine
         new { name = "office_export_document", description = "Exports the current document as PDF or native format (PPTX/DOCX/XLSX). Returns base64-encoded file data. Use for visual verification, backups, and sharing.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["format"] = new { type = "string", description = "'pdf' or 'native'. Default: 'pdf'.", @default = "pdf" }, ["maxSizeMB"] = new { type = "number", description = "Max file size in MB. Default: 50.", @default = 50 } }, required = new[] { "instanceId" } } },
 
         // ── Phase 14: Word Find & Replace ──────────────────────────────
-        new { name = "word_find_replace", description = "Finds and replaces text in a Word document. Supports wildcards, case matching, whole-word mode, and scoped replacement. Uses tracked changes.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["findText"] = new { type = "string", description = "Text or wildcard pattern to find." }, ["replaceText"] = new { type = "string", description = "Replacement text. Use empty string to delete." }, ["matchCase"] = new { type = "boolean", description = "Case-sensitive match. Default: false.", @default = false }, ["matchWholeWord"] = new { type = "boolean", description = "Match whole words only. Default: false.", @default = false }, ["useWildcards"] = new { type = "boolean", description = "Use Word wildcard syntax (?, *, [a-z]). Default: false.", @default = false }, ["previewOnly"] = new { type = "boolean", description = "List matches without replacing. Default: false.", @default = false }, ["scopeFromParagraph"] = new { type = "number", description = "0-based start paragraph for scoped search." }, ["scopeToParagraph"] = new { type = "number", description = "0-based end paragraph for scoped search." } }, required = new[] { "instanceId", "findText" } } },
+        new { name = "word_find_replace", description = "Finds and replaces text in a Word document. Supports wildcards, case matching, whole-word mode, and scoped replacement. Uses tracked changes.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["findText"] = new { type = "string", description = "Text or wildcard pattern to find." }, ["replaceText"] = new { type = "string", description = "Replacement text. Use empty string to delete." }, ["matchCase"] = new { type = "boolean", description = "Case-sensitive match. Default: false.", @default = false }, ["matchWholeWord"] = new { type = "boolean", description = "Match whole words only. Default: false.", @default = false }, ["useWildcards"] = new { type = "boolean", description = "Use Word wildcard syntax (?, *, [a-z]). Default: false.", @default = false }, ["previewOnly"] = new { type = "boolean", description = "List matches without replacing. Default: false.", @default = false }, ["scopeFromParagraph"] = new { type = "number", description = "0-based start paragraph for scoped search." }, ["scopeToParagraph"] = new { type = "number", description = "0-based end paragraph for scoped search." }, ["trackChanges"] = new { type = "boolean", description = "Wrap replacements as a tracked change (saves and restores the document's prior change-tracking mode). Default: true.", @default = true } }, required = new[] { "instanceId", "findText" } } },
 
         // ── Phase 16: Excel Navigation ─────────────────────────────────
         new { name = "excel_freeze_panes", description = "Freezes rows above and columns left of the specified cell for scroll navigation. Undoable via Ctrl+Z.", inputSchema = new { type = "object", properties = new Dictionary<string, object> { ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID." }, ["sheetName"] = new { type = "string", description = "Worksheet name." }, ["at"] = new { type = "string", description = "Cell address to freeze above/left of (e.g. 'A2' freezes row 1)." }, ["action"] = new { type = "string", description = "'freeze' or 'unfreeze'. Default: 'freeze'.", @default = "freeze" } }, required = new[] { "instanceId", "sheetName", "at" } } },

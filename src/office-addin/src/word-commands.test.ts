@@ -274,6 +274,82 @@ describe("word_add_comment", () => {
 	});
 });
 
+describe("word_get_comments", () => {
+	it("resolves anchorText and paragraph indices for a single-paragraph anchor", async () => {
+		mock.data.comments.push({
+			text: "Double check this stat",
+			paragraphIndex: 3,
+			id: "c1",
+			authorName: "Alice",
+			resolved: false,
+		});
+
+		const result = (await processCommand("c20", "word_get_comments", {})) as any;
+
+		expect(result.commentCount).toBe(1);
+		const c = result.comments[0];
+		expect(c.id).toBe("c1");
+		expect(c.author).toBe("Alice");
+		expect(c.anchorText).toBe("The market grew by 15% year over year.");
+		expect(c.startParagraphIndex).toBe(3);
+		expect(c.endParagraphIndex).toBe(3);
+		expect(c.localStart).toBe(0);
+		expect(c.localEnd).toBe("The market grew by 15% year over year.".length);
+	});
+
+	it("resolves startParagraphIndex/endParagraphIndex separately when the anchor crosses a paragraph boundary", async () => {
+		// Paragraph 3 spans [73,111), paragraph 4 spans [112,148) in the fixture doc
+		// (one separator char assumed between paragraphs). Anchor deliberately
+		// starts inside paragraph 3 and ends inside paragraph 4.
+		mock.data.comments.push({
+			text: "Spans two paragraphs",
+			paragraphIndex: 3,
+			id: "c2",
+			anchorStart: 100,
+			anchorEnd: 120,
+		});
+
+		const result = (await processCommand("c21", "word_get_comments", {})) as any;
+
+		const c = result.comments[0];
+		expect(c.anchorStart).toBe(100);
+		expect(c.anchorEnd).toBe(120);
+		expect(c.startParagraphIndex).toBe(3);
+		expect(c.endParagraphIndex).toBe(4);
+		expect(c.localStart).toBe(100 - 73);
+		expect(c.localEnd).toBe(120 - 112);
+	});
+
+	it("excludes resolved comments when includeResolved is false", async () => {
+		mock.data.comments.push(
+			{ text: "Open issue", paragraphIndex: 1, id: "c3", resolved: false },
+			{ text: "Closed issue", paragraphIndex: 5, id: "c4", resolved: true },
+		);
+
+		const result = (await processCommand("c22", "word_get_comments", {
+			includeResolved: false,
+		})) as any;
+
+		expect(result.commentCount).toBe(1);
+		expect(result.comments[0].id).toBe("c3");
+	});
+
+	it("includes replies", async () => {
+		mock.data.comments.push({
+			text: "Needs a source",
+			paragraphIndex: 2,
+			id: "c5",
+			replies: [{ text: "Added a citation", id: "r1", authorName: "Bob" }],
+		});
+
+		const result = (await processCommand("c23", "word_get_comments", {})) as any;
+
+		expect(result.comments[0].replies).toHaveLength(1);
+		expect(result.comments[0].replies[0].text).toBe("Added a citation");
+		expect(result.comments[0].replies[0].author).toBe("Bob");
+	});
+});
+
 describe("word_delete_paragraph", () => {
 	it("deletes a paragraph by index", async () => {
 		const result = (await processCommand("c16", "word_delete_paragraph", {
@@ -310,6 +386,22 @@ describe("word_replace_text tracked changes", () => {
 		expect(result.replaced).toBe(true);
 		expect(result.tracked).toBe(true);
 	});
+
+	it("returns tracked: false and leaves changeTrackingMode untouched when trackChanges is false", async () => {
+		const result = (await processCommand("c20b", "word_replace_text", {
+			paragraphIndex: 3,
+			oldText: "15%",
+			newText: "20%",
+			trackChanges: false,
+		})) as any;
+
+		expect(result.replaced).toBe(true);
+		expect(result.tracked).toBe(false);
+		expect(mock.data.paragraphs[3].text).toBe(
+			"The market grew by 20% year over year.",
+		);
+		expect(mock.data.changeTrackingMode).toBe("Off");
+	});
 });
 
 describe("word_insert_text tracked changes", () => {
@@ -322,6 +414,20 @@ describe("word_insert_text tracked changes", () => {
 		expect(result.inserted).toBe(true);
 		expect(result.tracked).toBe(true);
 	});
+
+	it("returns tracked: false and leaves changeTrackingMode untouched when trackChanges is false", async () => {
+		const result = (await processCommand("c21b", "word_insert_text", {
+			text: "Untracked insertion",
+			insertLocation: "end",
+			trackChanges: false,
+		})) as any;
+
+		expect(result.inserted).toBe(true);
+		expect(result.tracked).toBe(false);
+		expect(mock.data.paragraphs).toHaveLength(8);
+		expect(mock.data.paragraphs[7].text).toBe("Untracked insertion");
+		expect(mock.data.changeTrackingMode).toBe("Off");
+	});
 });
 
 describe("word_delete_paragraph tracked changes", () => {
@@ -332,6 +438,43 @@ describe("word_delete_paragraph tracked changes", () => {
 
 		expect(result.deleted).toBe(true);
 		expect(result.tracked).toBe(true);
+	});
+
+	it("returns tracked: false and leaves changeTrackingMode untouched when trackChanges is false", async () => {
+		const result = (await processCommand("c22b", "word_delete_paragraph", {
+			paragraphIndex: 3,
+			trackChanges: false,
+		})) as any;
+
+		expect(result.deleted).toBe(true);
+		expect(result.tracked).toBe(false);
+		expect(mock.data.paragraphs).toHaveLength(6);
+		expect(mock.data.changeTrackingMode).toBe("Off");
+	});
+});
+
+describe("word_find_replace tracked changes", () => {
+	it("returns tracked: true by default", async () => {
+		const result = (await processCommand("c22c", "word_find_replace", {
+			findText: "15%",
+			replaceText: "20%",
+		})) as any;
+
+		expect(result.replacements).toBe(1);
+		expect(result.tracked).toBe(true);
+		expect(mock.data.changeTrackingMode).toBe("Off");
+	});
+
+	it("returns tracked: false and leaves changeTrackingMode untouched when trackChanges is false", async () => {
+		const result = (await processCommand("c22d", "word_find_replace", {
+			findText: "15%",
+			replaceText: "20%",
+			trackChanges: false,
+		})) as any;
+
+		expect(result.replacements).toBe(1);
+		expect(result.tracked).toBe(false);
+		expect(mock.data.changeTrackingMode).toBe("Off");
 	});
 });
 

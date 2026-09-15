@@ -1,9 +1,10 @@
 # Piano: risolvere paragraphIndex per gli anchor dei commenti Word
 
-**Stato**: non implementato — solo pianificazione. Non modificare `word-commands.ts`
-finché questo piano non viene approvato ed eseguito esplicitamente, perché ci sono
-istanze live che usano il codice attuale e una modifica affrettata romperebbe quel
-lavoro in corso.
+**Stato**: implementato. `handleGetComments` in `word-commands.ts` ora usa
+`resolveParagraphIndicesForComments` (bucketing a due fasi) per arricchire l'output con
+`anchorStart`/`anchorEnd`/`startParagraphIndex`/`endParagraphIndex`/`localStart`/`localEnd`,
+ed è stato corretto il bug del doppio `c.getRange()`. Test aggiunti in
+`word-commands.test.ts` (incluso il caso limite multi-paragrafo). `TOOLS.md` aggiornato.
 
 ## Problema
 

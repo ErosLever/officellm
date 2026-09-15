@@ -425,8 +425,9 @@ async function handleReplaceText(args: unknown): Promise<unknown> {
 		paragraphIndex?: number;
 		oldText?: string;
 		newText?: string;
+		trackChanges?: boolean;
 	};
-	const { paragraphIndex = 0, oldText = "", newText = "" } = config;
+	const { paragraphIndex = 0, oldText = "", newText = "", trackChanges = true } = config;
 
 	return runInWord(async (ctx) => {
 		const paragraphs = ctx.document.body.paragraphs;
@@ -449,6 +450,9 @@ async function handleReplaceText(args: unknown): Promise<unknown> {
 				error: `Text '${oldText}' not found in paragraph ${paragraphIndex}`,
 			};
 		}
+
+		const savedMode = trackChanges ? await getChangeTrackingMode(ctx) : undefined;
+		if (trackChanges) ctx.document.changeTrackingMode = "TrackMineOnly";
 
 		// Word's Range.search() caps searchText at 255 characters
 		// (SearchStringInvalidOrTooLong beyond that) and applies its own
@@ -477,7 +481,12 @@ async function handleReplaceText(args: unknown): Promise<unknown> {
 			await ctx.sync();
 		}
 
-		return { paragraphIndex, oldText, newText, replaced: true, tracked: true };
+		if (trackChanges) {
+			ctx.document.changeTrackingMode = savedMode;
+			await ctx.sync();
+		}
+
+		return { paragraphIndex, oldText, newText, replaced: true, tracked: trackChanges };
 	});
 }
 
@@ -486,15 +495,25 @@ async function handleInsertText(args: unknown): Promise<unknown> {
 		text?: string;
 		insertLocation?: string;
 		paragraphIndex?: number;
+		trackChanges?: boolean;
 	};
-	const { text = "", insertLocation = "end", paragraphIndex } = config;
+	const { text = "", insertLocation = "end", paragraphIndex, trackChanges = true } = config;
 
 	return runInWord(async (ctx) => {
+		const savedMode = trackChanges ? await getChangeTrackingMode(ctx) : undefined;
+		if (trackChanges) ctx.document.changeTrackingMode = "TrackMineOnly";
+
 		if (insertLocation === "end" || paragraphIndex === undefined) {
 			// Insert at the end of the document
 			ctx.document.body.insertParagraph(text, "End");
 			await ctx.sync();
-			return { text, insertLocation: "end", inserted: true, tracked: true };
+
+			if (trackChanges) {
+				ctx.document.changeTrackingMode = savedMode;
+				await ctx.sync();
+			}
+
+			return { text, insertLocation: "end", inserted: true, tracked: trackChanges };
 		}
 
 		// Insert relative to a specific paragraph
@@ -503,6 +522,10 @@ async function handleInsertText(args: unknown): Promise<unknown> {
 		await ctx.sync();
 
 		if (paragraphIndex < 0 || paragraphIndex >= paragraphs.items.length) {
+			if (trackChanges) {
+				ctx.document.changeTrackingMode = savedMode;
+				await ctx.sync();
+			}
 			return { error: `Paragraph index ${paragraphIndex} out of range` };
 		}
 
@@ -511,12 +534,17 @@ async function handleInsertText(args: unknown): Promise<unknown> {
 		paragraph.insertParagraph(text, location);
 		await ctx.sync();
 
+		if (trackChanges) {
+			ctx.document.changeTrackingMode = savedMode;
+			await ctx.sync();
+		}
+
 		return {
 			text,
 			insertLocation,
 			paragraphIndex,
 			inserted: true,
-			tracked: true,
+			tracked: trackChanges,
 		};
 	});
 }
@@ -585,8 +613,8 @@ async function handleAddComment(args: unknown): Promise<unknown> {
 }
 
 async function handleDeleteParagraph(args: unknown): Promise<unknown> {
-	const config = args as { paragraphIndex?: number };
-	const { paragraphIndex = 0 } = config;
+	const config = args as { paragraphIndex?: number; trackChanges?: boolean };
+	const { paragraphIndex = 0, trackChanges = true } = config;
 
 	return runInWord(async (ctx) => {
 		const paragraphs = ctx.document.body.paragraphs;
@@ -597,17 +625,17 @@ async function handleDeleteParagraph(args: unknown): Promise<unknown> {
 			return { error: `Paragraph index ${paragraphIndex} out of range` };
 		}
 
-		// Enable tracked changes for this mutation
-		const savedMode = await getChangeTrackingMode(ctx);
-		ctx.document.changeTrackingMode = "TrackMineOnly";
+		// Enable tracked changes for this mutation, unless the caller opted out
+		const savedMode = trackChanges ? await getChangeTrackingMode(ctx) : undefined;
+		if (trackChanges) ctx.document.changeTrackingMode = "TrackMineOnly";
 
 		const paragraph = paragraphs.items[paragraphIndex];
 		paragraph.delete();
 		await ctx.sync();
 
-		ctx.document.changeTrackingMode = savedMode;
+		if (trackChanges) ctx.document.changeTrackingMode = savedMode;
 
-		return { paragraphIndex, deleted: true, tracked: true };
+		return { paragraphIndex, deleted: true, tracked: trackChanges };
 	});
 }
 
@@ -626,7 +654,7 @@ async function handleGetTrackedChanges(_args: unknown): Promise<unknown> {
 
 async function handleAcceptAllChanges(_args: unknown): Promise<unknown> {
 	return runInWord(async (ctx) => {
-		ctx.document.acceptAllChanges();
+		ctx.document.acceptAllRevisions();
 		await ctx.sync();
 
 		return { accepted: true };
@@ -635,7 +663,7 @@ async function handleAcceptAllChanges(_args: unknown): Promise<unknown> {
 
 async function handleRejectAllChanges(_args: unknown): Promise<unknown> {
 	return runInWord(async (ctx) => {
-		ctx.document.rejectAllChanges();
+		ctx.document.rejectAllRevisions();
 		await ctx.sync();
 
 		return { rejected: true };
@@ -1560,6 +1588,7 @@ async function handleFindReplace(args: unknown): Promise<unknown> {
 		previewOnly?: boolean;
 		scopeFromParagraph?: number;
 		scopeToParagraph?: number;
+		trackChanges?: boolean;
 	};
 
 	const {
@@ -1571,12 +1600,11 @@ async function handleFindReplace(args: unknown): Promise<unknown> {
 		previewOnly = false,
 		scopeFromParagraph,
 		scopeToParagraph,
+		trackChanges = true,
 	} = config;
 
-	const Word: any = (window as any).Word;
-
 	return runInWord(async (ctx: any) => {
-		const originalMode = await getChangeTrackingMode(ctx);
+		const originalMode = trackChanges ? await getChangeTrackingMode(ctx) : undefined;
 
 		// Build search options
 		const searchOptions: any = {};
@@ -1628,11 +1656,9 @@ async function handleFindReplace(args: unknown): Promise<unknown> {
 			};
 		}
 
-		// Perform replacements with tracked changes
-		if (!previewOnly) {
-			ctx.document.changeTrackingMode = (
-				Word as any
-			).ChangeTrackingMode.trackMineOnly;
+		// Perform replacements, tracked unless the caller opted out
+		if (!previewOnly && trackChanges) {
+			ctx.document.changeTrackingMode = "TrackMineOnly";
 		}
 
 		const matchCount = searchResults.items.length;
@@ -1641,7 +1667,7 @@ async function handleFindReplace(args: unknown): Promise<unknown> {
 		}
 		await ctx.sync();
 
-		if (!previewOnly) {
+		if (!previewOnly && trackChanges) {
 			ctx.document.changeTrackingMode = originalMode;
 			await ctx.sync();
 		}
@@ -1649,7 +1675,7 @@ async function handleFindReplace(args: unknown): Promise<unknown> {
 		return {
 			replacements: matchCount,
 			findText,
-			tracked: true,
+			tracked: trackChanges,
 		};
 	});
 }
@@ -2165,6 +2191,103 @@ async function handleSetFormatting(args: unknown): Promise<unknown> {
 
 // ── Comments ─────────────────────────────────────────────────────
 
+// Resolves anchorStart/anchorEnd (absolute character offsets, from
+// Word.Range.start/end) to paragraph indices for every comment in a single
+// batch, using two context.sync() round-trips total regardless of comment
+// count or document size:
+//  - Phase 1: load `start` for a sparse sample of paragraphs (step ~sqrt(n))
+//    to locate, per comment, the bucket of paragraphs its anchor falls in.
+//  - Phase 2: load `start,end,text` only for the union of buckets actually
+//    needed across all comments, then resolve each comment locally in JS.
+// Office.js's dominant cost is the number of sync() round-trips, not payload
+// size, so this beats both a full-scan (O(n) payload) and an adaptive binary
+// search (O(log n) *sequential* dependent syncs) for this use case.
+async function resolveParagraphIndicesForComments(
+	ctx: any,
+	anchors: Array<{ start: number; end: number }>,
+): Promise<Array<{ startParagraphIndex: number; endParagraphIndex: number; localStart: number; localEnd: number }>> {
+	const paragraphs = ctx.document.body.paragraphs;
+	paragraphs.load("items");
+	await ctx.sync();
+
+	const n = paragraphs.items.length;
+	if (n === 0 || anchors.length === 0) {
+		return anchors.map(() => ({ startParagraphIndex: 0, endParagraphIndex: 0, localStart: 0, localEnd: 0 }));
+	}
+
+	// Phase 1 — sparse sample of paragraph start offsets.
+	const k = Math.max(1, Math.ceil(Math.sqrt(n)));
+	const sampleIndices: number[] = [];
+	for (let i = 0; i < n; i += k) sampleIndices.push(i);
+	if (sampleIndices[sampleIndices.length - 1] !== n - 1) sampleIndices.push(n - 1);
+
+	const sampleRanges = sampleIndices.map((i) => paragraphs.items[i].getRange());
+	sampleRanges.forEach((r: any) => r.load("start"));
+	await ctx.sync(); // sync #1
+
+	const sampleStarts = sampleRanges.map((r: any) => r.start as number);
+
+	// Given an absolute offset, find the sample bucket [lo, hi] (paragraph
+	// indices) that must contain it — a linear scan over O(sqrt(n)) samples.
+	const findBucket = (offset: number): [number, number] => {
+		let bucketStart = 0;
+		let bucketEnd = n - 1;
+		for (let s = 0; s < sampleIndices.length; s++) {
+			if (sampleStarts[s] <= offset) {
+				bucketStart = sampleIndices[s];
+				bucketEnd = s + 1 < sampleIndices.length ? sampleIndices[s + 1] : n - 1;
+			} else {
+				break;
+			}
+		}
+		return [bucketStart, bucketEnd];
+	};
+
+	const neededParagraphIndices = new Set<number>();
+	const buckets = anchors.map(({ start, end }) => {
+		const startBucket = findBucket(start);
+		const endBucket = findBucket(end);
+		for (let i = startBucket[0]; i <= startBucket[1]; i++) neededParagraphIndices.add(i);
+		for (let i = endBucket[0]; i <= endBucket[1]; i++) neededParagraphIndices.add(i);
+		return { startBucket, endBucket };
+	});
+
+	// Phase 2 — load start/end/text only for the union of needed paragraphs.
+	const bucketRanges = new Map<number, any>();
+	for (const i of neededParagraphIndices) {
+		const range = paragraphs.items[i].getRange();
+		range.load("start,end,text");
+		bucketRanges.set(i, range);
+	}
+	await ctx.sync(); // sync #2
+
+	const resolveOffset = (offset: number, [lo, hi]: [number, number]): number => {
+		for (let i = lo; i <= hi; i++) {
+			const range = bucketRanges.get(i);
+			if (range && offset >= range.start && offset <= range.end) return i;
+		}
+		// Fallback: offset fell just outside the sampled bucket (e.g. trailing
+		// paragraph boundary rounding) — clamp to the nearest bucket edge.
+		return offset < (bucketRanges.get(lo)?.start ?? 0) ? lo : hi;
+	};
+
+	return anchors.map(({ start, end }, idx) => {
+		const { startBucket, endBucket } = buckets[idx];
+		const startParagraphIndex = resolveOffset(start, startBucket);
+		const startRange = bucketRanges.get(startParagraphIndex);
+		const localStart = start - (startRange?.start ?? 0);
+
+		let endParagraphIndex = startParagraphIndex;
+		if (startRange && end > startRange.end) {
+			endParagraphIndex = resolveOffset(end, endBucket);
+		}
+		const endRange = bucketRanges.get(endParagraphIndex);
+		const localEnd = end - (endRange?.start ?? 0);
+
+		return { startParagraphIndex, endParagraphIndex, localStart, localEnd };
+	});
+}
+
 async function handleGetComments(args: unknown): Promise<unknown> {
 	const config = args as { includeResolved?: boolean };
 	const includeResolved = config.includeResolved ?? true;
@@ -2181,23 +2304,33 @@ async function handleGetComments(args: unknown): Promise<unknown> {
 		}
 		await ctx.sync();
 
-		// Load reply properties
+		// Load reply properties and each comment's anchor range in one shot —
+		// getRange() creates a new tracked proxy each call, so store the single
+		// reference we load() here and never call c.getRange() again.
+		const ranges = new Map<string, any>();
 		for (const c of comments.items) {
 			for (const r of c.replies.items) {
 				r.load("id,content,authorName,authorEmail,creationDate");
 			}
-			// Load anchor text
-			c.getRange().load("text");
+			const range = c.getRange();
+			range.load("text,start,end");
+			ranges.set(c.id, range);
 		}
 		await ctx.sync();
 
+		const anchors = comments.items.map((c: any) => {
+			const range = ranges.get(c.id);
+			return { start: range?.start ?? 0, end: range?.end ?? 0 };
+		});
+		const resolved = await resolveParagraphIndicesForComments(ctx, anchors);
+
 		const result = [];
-		for (const c of comments.items) {
+		for (let i = 0; i < comments.items.length; i++) {
+			const c = comments.items[i];
 			if (!includeResolved && c.resolved) continue;
-			const anchorText = (() => {
-				try { return String(c.getRange().text ?? "").slice(0, 80); }
-				catch { return ""; }
-			})();
+			const range = ranges.get(c.id);
+			const anchorText = String(range?.text ?? "").slice(0, 80);
+			const { startParagraphIndex, endParagraphIndex, localStart, localEnd } = resolved[i];
 			result.push({
 				id: c.id,
 				author: c.authorName,
@@ -2206,6 +2339,12 @@ async function handleGetComments(args: unknown): Promise<unknown> {
 				text: c.content,
 				resolved: c.resolved,
 				anchorText,
+				anchorStart: anchors[i].start,
+				anchorEnd: anchors[i].end,
+				startParagraphIndex,
+				endParagraphIndex,
+				localStart,
+				localEnd,
 				replies: c.replies.items.map((r: any) => ({
 					id: r.id,
 					author: r.authorName,

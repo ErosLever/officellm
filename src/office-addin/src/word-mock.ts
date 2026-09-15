@@ -18,10 +18,38 @@ export interface MockInlinePictureData {
 	imageFormat?: string;
 }
 
+export interface MockCommentReplyData {
+	id?: string;
+	text: string;
+	authorName?: string;
+	authorEmail?: string;
+	creationDate?: Date;
+}
+
+export interface MockCommentData {
+	text: string;
+	paragraphIndex?: number;
+	id?: string;
+	authorName?: string;
+	authorEmail?: string;
+	creationDate?: Date;
+	resolved?: boolean;
+	// Absolute document character offsets for the comment's anchor range.
+	// When omitted, defaults to the whole span of `paragraphIndex`'s paragraph
+	// (computed from cumulative paragraph text lengths, one separator char
+	// between paragraphs — mirrors Word.Range.start/end well enough for tests).
+	anchorStart?: number;
+	anchorEnd?: number;
+	// Document text under the comment's anchor range — distinct from `text`
+	// (the comment's own content). Defaults to the anchored paragraph's text.
+	anchorText?: string;
+	replies?: MockCommentReplyData[];
+}
+
 export interface MockDocumentData {
 	paragraphs: MockParagraphData[];
 	selectedText?: string;
-	comments: Array<{ text: string; paragraphIndex?: number }>;
+	comments: MockCommentData[];
 	changeTrackingMode: "Off" | "TrackAll" | "TrackMineOnly";
 	changeLog: Array<{
 		type: string;
@@ -30,6 +58,21 @@ export interface MockDocumentData {
 		newText?: string;
 	}>;
 	inlinePictures?: MockInlinePictureData[];
+}
+
+// Cumulative absolute character offsets per paragraph — one separator
+// character assumed between paragraphs, mirroring how Word.Range.start/end
+// account for paragraph marks.
+function computeParagraphOffsets(paragraphs: MockParagraphData[]): Array<{ start: number; end: number }> {
+	const offsets: Array<{ start: number; end: number }> = [];
+	let pos = 0;
+	for (const p of paragraphs) {
+		const start = pos;
+		const end = start + p.text.length;
+		offsets.push({ start, end });
+		pos = end + 1;
+	}
+	return offsets;
 }
 
 export class WordMock {
@@ -87,12 +130,12 @@ export class WordMock {
 		this.reportResultCalls.push({ commandId, success, error, payload });
 	};
 
-	acceptAllChanges() {
+	acceptAllRevisions() {
 		// Clear the change log — changes are accepted (applied)
 		this._data.changeLog = [];
 	}
 
-	rejectAllChanges() {
+	rejectAllRevisions() {
 		// Revert all tracked changes back to original state
 		for (const change of [...this._data.changeLog].reverse()) {
 			if (change.type === "replace" && change.oldText !== undefined) {
@@ -179,11 +222,11 @@ class MockDocument {
 		return new MockSelection(this._ctx, this._data);
 	}
 
-	acceptAllChanges() {
+	acceptAllRevisions() {
 		this._data.changeLog = [];
 	}
 
-	rejectAllChanges() {
+	rejectAllRevisions() {
 		// Revert all tracked changes
 		for (const change of [...this._data.changeLog].reverse()) {
 			if (change.type === "replace" && change.oldText !== undefined) {
@@ -237,6 +280,227 @@ class MockBody {
 
 	search(searchText: string, options: any) {
 		return new MockSearchResults(this._ctx, this._data, searchText, options);
+	}
+
+	getComments() {
+		return new MockCommentCollection(this._ctx, this._data);
+	}
+}
+
+// ── Mock Comments ────────────────────────────────────────────────
+
+class MockCommentCollection {
+	private _ctx: WordMockContext;
+	private _data: MockDocumentData;
+	items: MockComment[];
+
+	constructor(ctx: WordMockContext, data: MockDocumentData) {
+		this._ctx = ctx;
+		this._data = data;
+		this.items = data.comments.map((c, i) => new MockComment(ctx, data, c, i));
+	}
+
+	load(_props: string) {
+		this._ctx.queueLoad(this, []);
+	}
+
+	_populate(_props: string[]) {
+		/* items already populated */
+	}
+}
+
+class MockComment {
+	private _ctx: WordMockContext;
+	private _data: MockDocumentData;
+	private _comment: MockCommentData;
+	private _index: number;
+	private _loaded = new Set<string>();
+
+	private _id = "";
+	private _content = "";
+	private _authorName = "";
+	private _authorEmail = "";
+	private _creationDate: Date = new Date(0);
+	private _resolved = false;
+	replies: MockCommentReplyCollection;
+
+	constructor(ctx: WordMockContext, data: MockDocumentData, comment: MockCommentData, index: number) {
+		this._ctx = ctx;
+		this._data = data;
+		this._comment = comment;
+		this._index = index;
+		this._id = comment.id ?? `comment_${index}`;
+		this.replies = new MockCommentReplyCollection(ctx, comment);
+	}
+
+	get id() {
+		return this._id;
+	}
+	get content() {
+		return this._content;
+	}
+	set content(text: string) {
+		this._content = text;
+		this._ctx.queueAction(() => {
+			this._comment.text = text;
+		});
+	}
+	get authorName() {
+		return this._authorName;
+	}
+	get authorEmail() {
+		return this._authorEmail;
+	}
+	get creationDate() {
+		return this._creationDate;
+	}
+	get resolved() {
+		return this._resolved;
+	}
+	set resolved(value: boolean) {
+		this._resolved = value;
+		this._ctx.queueAction(() => {
+			this._comment.resolved = value;
+		});
+	}
+
+	load(propString: string) {
+		const props = propString.split(",").map((p) => p.trim());
+		for (const p of props) this._loaded.add(p);
+		this._ctx.queueLoad(this, props);
+	}
+
+	_populate(props: string[]) {
+		const l = this._loaded;
+		if (l.has("id") || props.includes("id")) this._id = this._comment.id ?? `comment_${this._index}`;
+		if (l.has("content") || props.includes("content")) this._content = this._comment.text;
+		if (l.has("authorName") || props.includes("authorName"))
+			this._authorName = this._comment.authorName ?? "";
+		if (l.has("authorEmail") || props.includes("authorEmail"))
+			this._authorEmail = this._comment.authorEmail ?? "";
+		if (l.has("creationDate") || props.includes("creationDate"))
+			this._creationDate = this._comment.creationDate ?? new Date(0);
+		if (l.has("resolved") || props.includes("resolved"))
+			this._resolved = this._comment.resolved ?? false;
+	}
+
+	getRange() {
+		const paragraphIndex = this._comment.paragraphIndex ?? 0;
+		const para = this._data.paragraphs[paragraphIndex];
+		const offsets = computeParagraphOffsets(this._data.paragraphs)[paragraphIndex] ?? { start: 0, end: 0 };
+		const start = this._comment.anchorStart ?? offsets.start;
+		const end = this._comment.anchorEnd ?? offsets.end;
+		const anchorText = this._comment.anchorText ?? para?.text ?? "";
+		return new MockRange(this._ctx, anchorText, undefined, undefined, start, end);
+	}
+
+	reply(text: string) {
+		if (!this._comment.replies) this._comment.replies = [];
+		const replyData: MockCommentReplyData = { text, id: `reply_${this._comment.replies.length}` };
+		this._ctx.queueAction(() => {
+			this._comment.replies!.push(replyData);
+		});
+		const newReply = new MockCommentReply(this._ctx, this._comment, replyData, this.replies.items.length);
+		this.replies.items.push(newReply);
+		return newReply;
+	}
+
+	delete() {
+		this._ctx.queueAction(() => {
+			const idx = this._data.comments.indexOf(this._comment);
+			if (idx !== -1) this._data.comments.splice(idx, 1);
+		});
+	}
+}
+
+class MockCommentReplyCollection {
+	private _ctx: WordMockContext;
+	private _comment: MockCommentData;
+	items: MockCommentReply[];
+
+	constructor(ctx: WordMockContext, comment: MockCommentData) {
+		this._ctx = ctx;
+		this._comment = comment;
+		this.items = (comment.replies ?? []).map((r, i) => new MockCommentReply(ctx, comment, r, i));
+	}
+
+	load(_props: string) {
+		this._ctx.queueLoad(this, []);
+	}
+
+	_populate(_props: string[]) {
+		/* items already populated */
+	}
+}
+
+class MockCommentReply {
+	private _ctx: WordMockContext;
+	private _comment: MockCommentData;
+	private _reply: MockCommentReplyData;
+	private _index: number;
+	private _loaded = new Set<string>();
+
+	private _id = "";
+	private _content = "";
+	private _authorName = "";
+	private _authorEmail = "";
+	private _creationDate: Date = new Date(0);
+
+	constructor(ctx: WordMockContext, comment: MockCommentData, reply: MockCommentReplyData, index: number) {
+		this._ctx = ctx;
+		this._comment = comment;
+		this._reply = reply;
+		this._index = index;
+		this._id = reply.id ?? `reply_${index}`;
+	}
+
+	get id() {
+		return this._id;
+	}
+	get content() {
+		return this._content;
+	}
+	set content(text: string) {
+		this._content = text;
+		this._ctx.queueAction(() => {
+			this._reply.text = text;
+		});
+	}
+	get authorName() {
+		return this._authorName;
+	}
+	get authorEmail() {
+		return this._authorEmail;
+	}
+	get creationDate() {
+		return this._creationDate;
+	}
+
+	load(propString: string) {
+		const props = propString.split(",").map((p) => p.trim());
+		for (const p of props) this._loaded.add(p);
+		this._ctx.queueLoad(this, props);
+	}
+
+	_populate(props: string[]) {
+		const l = this._loaded;
+		if (l.has("id") || props.includes("id")) this._id = this._reply.id ?? `reply_${this._index}`;
+		if (l.has("content") || props.includes("content")) this._content = this._reply.text;
+		if (l.has("authorName") || props.includes("authorName"))
+			this._authorName = this._reply.authorName ?? "";
+		if (l.has("authorEmail") || props.includes("authorEmail"))
+			this._authorEmail = this._reply.authorEmail ?? "";
+		if (l.has("creationDate") || props.includes("creationDate"))
+			this._creationDate = this._reply.creationDate ?? new Date(0);
+	}
+
+	delete() {
+		this._ctx.queueAction(() => {
+			const replies = this._comment.replies;
+			if (!replies) return;
+			const idx = replies.indexOf(this._reply);
+			if (idx !== -1) replies.splice(idx, 1);
+		});
 	}
 }
 
@@ -372,6 +636,7 @@ class MockParagraph {
 	}
 
 	getRange(_location: string) {
+		const offsets = computeParagraphOffsets(this._data.paragraphs)[this._index];
 		return new MockRange(
 			this._ctx,
 			this._para.text,
@@ -382,8 +647,12 @@ class MockParagraph {
 				this._data.comments.push({
 					text: commentText,
 					paragraphIndex: this._index,
+					anchorStart: offsets.start,
+					anchorEnd: offsets.end,
 				});
 			},
+			offsets.start,
+			offsets.end,
 		);
 	}
 
@@ -549,21 +818,33 @@ class MockRange {
 	private _text: string;
 	private _onReplace?: (oldText: string, newText: string) => void;
 	private _onComment?: (text: string) => void;
+	private _start: number;
+	private _end: number;
 
 	constructor(
 		ctx: WordMockContext,
 		text: string,
 		onReplace?: (oldText: string, newText: string) => void,
 		onComment?: (text: string) => void,
+		start = 0,
+		end = 0,
 	) {
 		this._ctx = ctx;
 		this._text = text;
 		this._onReplace = onReplace;
 		this._onComment = onComment;
+		this._start = start;
+		this._end = end;
 	}
 
 	get text() {
 		return this._text;
+	}
+	get start() {
+		return this._start;
+	}
+	get end() {
+		return this._end;
 	}
 
 	load(_props: string) {
@@ -584,5 +865,16 @@ class MockRange {
 		this._ctx.queueAction(() => {
 			if (this._onComment) this._onComment(commentText);
 		});
+	}
+
+	expandTo(other: MockRange): MockRange {
+		return new MockRange(
+			this._ctx,
+			this._text,
+			this._onReplace,
+			this._onComment,
+			Math.min(this._start, other.start),
+			Math.max(this._end, other.end),
+		);
 	}
 }
