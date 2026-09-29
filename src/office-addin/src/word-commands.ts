@@ -685,11 +685,13 @@ async function handleGetTables(args: unknown): Promise<unknown> {
 			index: number;
 			rowCount: number;
 			columnCount: number;
+			columnWidths?: number[][];
 			cells?: string[][];
 		}> = [];
 		for (let i = 0; i < tables.items.length; i++) {
 			const tbl = tables.items[i];
 			tbl.load("rowCount,columnCount");
+			tbl.rows.load("items");
 			await ctx.sync();
 
 			const entry: (typeof result)[0] = {
@@ -698,24 +700,30 @@ async function handleGetTables(args: unknown): Promise<unknown> {
 				columnCount: tbl.columnCount,
 			};
 
+			// Read column widths per row (not just row 0): columnWidth is only
+			// guaranteed uniform across rows on a "uniform" table
+			// (Word.Table.isUniform) — non-uniform tables can carry a different
+			// width per row, so row 0 alone can hide a mismatch elsewhere.
+			const widthRows: Word.TableRow[] = tbl.rows.items.slice(0, maxRows);
+			for (const row of widthRows) row.cells.load("items");
+			await ctx.sync();
+			for (const row of widthRows) {
+				for (const cell of row.cells.items) cell.load("columnWidth");
+			}
+			await ctx.sync();
+			entry.columnWidths = widthRows.map((row) => row.cells.items.map((cell: Word.TableCell) => cell.columnWidth));
+
 			if (includeCellText) {
-				const rows = Math.min(tbl.rowCount, maxRows);
-				const cells: string[][] = [];
-				for (let r = 0; r < rows; r++) {
-					const rowCells: string[] = [];
-					for (let c = 0; c < tbl.columnCount; c++) {
-						try {
-							const cell = tbl.getCell(r, c);
-							cell.value.load("text");
-							await ctx.sync();
-							rowCells.push(String((cell.value as any).text || ""));
-						} catch {
-							rowCells.push("[error]");
-						}
-					}
-					cells.push(rowCells);
+				// Table.columnCount is unreliable on tables with an irregular grid
+				// (rows with merged/split cells), so read each row's own cell
+				// collection instead of looping c < tbl.columnCount.
+				const rowsToRead: Word.TableRow[] = tbl.rows.items.slice(0, maxRows);
+				for (const row of rowsToRead) {
+					row.cells.load("items/value");
 				}
-				entry.cells = cells;
+				await ctx.sync();
+
+				entry.cells = rowsToRead.map((row) => row.cells.items.map((cell) => cell.value || ""));
 			}
 			result.push(entry);
 		}
@@ -818,7 +826,7 @@ async function handleUpdateTableCell(args: unknown): Promise<unknown> {
 		}
 
 		const cell = tbl.getCell(row, column);
-		cell.value.text = text;
+		cell.value = text;
 		await ctx.sync();
 
 		ctx.document.changeTrackingMode = originalMode;
@@ -1059,39 +1067,69 @@ async function handleCopyTableStructure(args: unknown): Promise<unknown> {
 			return { error: `Table index ${tableIndex} out of bounds`, errorCode: "CELL_OUT_OF_BOUNDS" };
 
 		const tbl = tables.items[tableIndex as number];
-		tbl.load("rowCount,columnCount,headerRowCount");
+		tbl.load("rowCount,headerRowCount");
+		tbl.rows.load("items");
 		await ctx.sync();
 
-		const numCols = tbl.columnCount;
+		// Table.columnCount is unreliable on tables with an irregular grid
+		// (rows with merged/split cells), so derive the column count from
+		// row 0's own cell collection instead.
+		const firstRow = tbl.rows.items[0];
+		firstRow.cells.load("items");
+		await ctx.sync();
+		const numCols = firstRow.cells.items.length;
 		const headerCount = (includeHeaders && tbl.headerRowCount > 0) ? tbl.headerRowCount : 0;
 
 		// Read header cell text
 		let headerRow: string[] | undefined;
 		if (headerCount > 0) {
-			headerRow = [];
-			for (let c = 0; c < numCols; c++) {
-				const cell = tbl.getCell(0, c);
-				cell.value.load("text");
-				await ctx.sync();
-				headerRow.push(String((cell.value as any).text ?? ""));
-			}
+			const headerCells = firstRow.cells.items;
+			for (const cell of headerCells) cell.load("value");
+			await ctx.sync();
+			headerRow = headerCells.map((cell: Word.TableCell) => String(cell.value ?? ""));
 		}
 
 		// Read borders and cell padding
 		const borders = await readTableBorders(tbl, ctx);
 		const padLocs = ["Top","Left","Bottom","Right"] as const;
-		const padProxies = padLocs.map(l => { const p = tbl.getCellPadding(l as any); p.load("value"); return p; });
+		const padProxies = padLocs.map(l => tbl.getCellPadding(l as any));
 		await ctx.sync();
-		const padding = Object.fromEntries(padLocs.map((l,i) => [l, (padProxies[i] as any).value as number]));
+		const padding = Object.fromEntries(padLocs.map((l,i) => [l, padProxies[i].value as number]));
 
 		// Read column widths from row 0
-		const colWidths: number[] = [];
-		for (let c = 0; c < numCols; c++) {
-			const cell = tbl.getCell(0, c);
-			cell.load("columnWidth");
-			await ctx.sync();
-			colWidths.push(cell.columnWidth);
+		for (const cell of firstRow.cells.items) cell.load("columnWidth");
+		await ctx.sync();
+		const colWidths: number[] = firstRow.cells.items.map((cell: Word.TableCell) => cell.columnWidth);
+
+		const totalRows = headerCount + (emptyRows as number);
+
+		// Read per-cell shading + font for as many source rows as we'll recreate, so the
+		// new table's cell background and font styling (e.g. bold white label cells on a
+		// colored background) match the source instead of reverting to Word's plain default.
+		const styleRowCount = Math.min(totalRows, tbl.rows.items.length);
+		const styleRows = tbl.rows.items.slice(0, styleRowCount);
+		for (const row of styleRows) row.cells.load("items");
+		await ctx.sync();
+		for (const row of styleRows) {
+			for (const cell of row.cells.items) {
+				cell.load("shadingColor");
+				cell.body.load("style");
+				cell.body.font.load("name,size,bold,italic,underline,color");
+			}
 		}
+		await ctx.sync();
+		const cellStyles = styleRows.map((row: Word.TableRow) => row.cells.items.map((cell: Word.TableCell) => ({
+			shadingColor: cell.shadingColor,
+			paragraphStyle: cell.body.style,
+			font: {
+				name: cell.body.font.name,
+				size: cell.body.font.size,
+				bold: cell.body.font.bold,
+				italic: cell.body.font.italic,
+				underline: cell.body.font.underline,
+				color: cell.body.font.color,
+			},
+		})));
 
 		// Determine insert range
 		const body = ctx.document.body;
@@ -1106,8 +1144,7 @@ async function handleCopyTableStructure(args: unknown): Promise<unknown> {
 			insertRange = idx < paras.items.length ? paras.items[idx].getRange("After") : body.getRange("End");
 		}
 
-		const totalRows = headerCount + (emptyRows as number);
-		const newTbl = insertRange.insertTable(totalRows, numCols, Word.InsertLocation.after, headerRow ?? null);
+		const newTbl = insertRange.insertTable(totalRows, numCols, Word.InsertLocation.after, headerRow ? [headerRow] : null);
 		await ctx.sync();
 
 		// Apply borders
@@ -1123,6 +1160,36 @@ async function handleCopyTableStructure(args: unknown): Promise<unknown> {
 		for (let c = 0; c < numCols; c++) {
 			const cell = newTbl.getCell(0, c);
 			cell.columnWidth = colWidths[c];
+		}
+		await ctx.sync();
+
+		// Apply per-cell shading + font captured from the source table. The header row's
+		// text was already seeded via insertTable, so this only sets its style; every other
+		// row is still empty (created via emptyRows) and gets both style and shading.
+		for (let r = 0; r < cellStyles.length; r++) {
+			for (let c = 0; c < cellStyles[r].length; c++) {
+				const style = cellStyles[r][c];
+				const newCell = newTbl.getCell(r, c);
+				if (style.shadingColor) newCell.shadingColor = style.shadingColor;
+				// New cells inherit the paragraph style (e.g. "Heading 2") from the
+				// insertion point rather than defaulting to "Normal" — without resetting
+				// it explicitly, cell text silently picks up heading formatting (size,
+				// color, spacing) when the table is appended right after a heading.
+				if (style.paragraphStyle) newCell.body.style = style.paragraphStyle;
+				const f = newCell.body.font;
+				// Word reports "inherit" for fonts that fall through to a theme/style
+				// default rather than an explicit font name; it's not a valid font
+				// family to assign back, so skip it and let the cell keep its own default.
+				if (style.font.name && style.font.name !== "inherit") f.name = style.font.name;
+				if (style.font.size != null) f.size = style.font.size;
+				f.bold = style.font.bold;
+				f.italic = style.font.italic;
+				// "Mixed" means the source text ran multiple underline styles at once
+				// (e.g. part of a cell is a hyperlink); it's a read-only aggregate
+				// state, not a value Word accepts when writing back.
+				if (style.font.underline && style.font.underline !== "Mixed") f.underline = style.font.underline;
+				if (style.font.color) f.color = style.font.color;
+			}
 		}
 		await ctx.sync();
 
@@ -1158,8 +1225,25 @@ async function handleSetTableFormat(args: unknown): Promise<unknown> {
 
 		if (config.columnWidths !== undefined) {
 			const widths = config.columnWidths as number[];
-			for (let c = 0; c < Math.min(widths.length, tbl.columnCount); c++) {
-				tbl.getCell(0, c).columnWidth = widths[c];
+			// Word's default AutoFit ("Content") continuously resizes columns to
+			// fit each cell's text, silently overriding any explicit columnWidth —
+			// e.g. a longer name in one table's row keeps that column wider even
+			// after columnWidth is set to match a narrower table. Disable AutoFit
+			// first so the explicit widths actually stick.
+			tbl.autoFitBehavior(Word.AutoFitBehavior.fixedSize);
+			// TableCell.columnWidth only applies uniformly across a "uniform" table
+			// (Word.Table.isUniform) — many real tables (built row-by-row, or with
+			// merged/split cells) store column widths per row, so setting it on row
+			// 0 alone leaves every other row unchanged. Set it on every row's cell
+			// in that column to make the width actually apply throughout.
+			tbl.rows.load("items");
+			await ctx.sync();
+			for (const row of tbl.rows.items) row.cells.load("items");
+			await ctx.sync();
+			for (const row of tbl.rows.items) {
+				for (let c = 0; c < Math.min(widths.length, row.cells.items.length); c++) {
+					row.cells.items[c].columnWidth = widths[c];
+				}
 			}
 			applied.push("columnWidths");
 		}
@@ -2067,7 +2151,7 @@ async function handleGetFormatting(args: unknown): Promise<unknown> {
 		for (let i = from; i <= to; i++) {
 			const p = paras.items[i];
 			p.load("text,style,alignment,firstLineIndent,leftIndent,rightIndent,lineSpacing,spaceAfter,spaceBefore,outlineLevel");
-			p.font.load("name,size,bold,italic,underline,color,strikeThrough,doubleStrikeThrough,subscript,superscript,highlightColor");
+			p.font.load("name,size,bold,italic,underline,color,strikeThrough,doubleStrikeThrough,subscript,superscript,highlightColor,allCaps,smallCaps");
 		}
 		await ctx.sync();
 
@@ -2099,6 +2183,8 @@ async function handleGetFormatting(args: unknown): Promise<unknown> {
 					subscript: p.font.subscript ?? false,
 					superscript: p.font.superscript ?? false,
 					highlightColor: String(p.font.highlightColor ?? ""),
+					allCaps: p.font.allCaps ?? false,
+					smallCaps: p.font.smallCaps ?? false,
 				},
 			});
 		}
@@ -2134,6 +2220,8 @@ async function handleSetFormatting(args: unknown): Promise<unknown> {
 		subscript?: boolean;
 		superscript?: boolean;
 		highlightColor?: string;
+		allCaps?: boolean;
+		smallCaps?: boolean;
 	};
 
 	return runInWord(async (ctx) => {
@@ -2182,6 +2270,8 @@ async function handleSetFormatting(args: unknown): Promise<unknown> {
 			if (config.subscript !== undefined)          p.font.subscript = config.subscript;
 			if (config.superscript !== undefined)        p.font.superscript = config.superscript;
 			if (config.highlightColor !== undefined)     p.font.highlightColor = config.highlightColor;
+			if (config.allCaps !== undefined)            p.font.allCaps = config.allCaps;
+			if (config.smallCaps !== undefined)          p.font.smallCaps = config.smallCaps;
 		}
 
 		await ctx.sync();
