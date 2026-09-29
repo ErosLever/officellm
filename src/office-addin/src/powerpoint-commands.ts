@@ -177,7 +177,11 @@ export async function processCommand(
 			success = false;
 		}
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const officeError = error as any;
+		let errorMessage = error instanceof Error ? error.message : String(error);
+		if (officeError?.debugInfo) {
+			errorMessage += ` | debugInfo: ${JSON.stringify(officeError.debugInfo)}`;
+		}
 		console.error(`Command ${commandId} failed:`, errorMessage);
 		success = false;
 		result = { error: errorMessage };
@@ -1016,13 +1020,12 @@ async function handleGetTable(args: unknown): Promise<unknown> {
 		const cols = table.columnCount;
 
 		// Read all cells in a single sync
-		const cellTexts: any[] = [];
+		const cellRefs: any[] = [];
 		for (let r = 0; r < rows; r++) {
 			for (let c = 0; c < cols; c++) {
-				const cell = table.getCell(r, c);
-				const tf = cell.textFrame;
-				ctx.load(tf, "textRange/text");
-				cellTexts.push(tf);
+				const cell = table.getCellOrNullObject(r, c);
+				cell.load("text");
+				cellRefs.push(cell);
 			}
 		}
 		await ctx.sync();
@@ -1033,8 +1036,8 @@ async function handleGetTable(args: unknown): Promise<unknown> {
 		for (let r = 0; r < rows; r++) {
 			const row: string[] = [];
 			for (let c = 0; c < cols; c++) {
-				const tf = cellTexts[idx++];
-				row.push(safeStr(tf.textRange?.text));
+				const cell = cellRefs[idx++];
+				row.push(safeStr(cell.text));
 			}
 			cells.push(row);
 		}
@@ -1049,6 +1052,111 @@ async function handleGetTable(args: unknown): Promise<unknown> {
 	});
 }
 
+/**
+ * Core of handleGetShapeParagraphs, operating on an already-resolved shape
+ * rather than re-resolving by slideIndex/shapeId — shared with the shape
+ * snapshot logic (powerpoint_copy_shape), which already holds a live shape
+ * reference (including group-child shapes not addressable via resolveShape).
+ */
+async function getShapeParagraphsData(
+	shape: PowerPoint.Shape,
+	ctx: PowerPoint.RequestContext,
+	label = "Shape",
+): Promise<{ error: string } | {
+	fullText: string;
+	defaultProperties: RangeProperties;
+	propertyGroups: { groupId: number; properties: Record<string, unknown> }[];
+	paragraphs: { index: number; text: string; start: number; length: number; groupId: number }[];
+}> {
+	const tf = shape.getTextFrameOrNullObject();
+	ctx.load(tf, "isNullObject,textRange/text");
+	await ctx.sync();
+
+	if (tf.isNullObject) {
+		return { error: `${label} does not support text (type: image/table/etc)` };
+	}
+
+	const fullText = safeStr(tf.textRange.text);
+	const paragraphSpans = splitParagraphs(fullText);
+
+	// Batch: load the whole-range properties (the defaultProperties
+	// baseline) plus one getSubstring() range per paragraph, all in a
+	// single sync — mirrors handleGetTable's create-N-then-one-sync shape.
+	ctx.load(tf.textRange, TEXT_RANGE_PROP_PATH);
+	const paragraphRanges = paragraphSpans.map((span) => {
+		const range = tf.textRange.getSubstring(span.start, span.length);
+		ctx.load(range, TEXT_RANGE_PROP_PATH);
+		return range;
+	});
+	await ctx.sync();
+
+	const defaultProperties = extractRangeProperties(tf.textRange);
+
+	// PowerPoint's whole-range font.size getter can report the
+	// mixed/unresolved sentinel (0 after safeNum) even when every
+	// character in the range shares the same real, explicit size (seen
+	// live: an all-35pt title still reported the sentinel for the whole
+	// range and for a getSubstring() spanning its full length). Sample a
+	// single character — which reliably resolves — before falling back
+	// to the shape's layout-inherited size.
+	const needsDefaultSample = safeNum((defaultProperties.font as { fontSize?: number }).fontSize) === 0 && fullText.length > 0;
+	const defaultSample = needsDefaultSample ? tf.textRange.getSubstring(0, 1) : null;
+	if (defaultSample) ctx.load(defaultSample, "font/size");
+
+	const paragraphSamples = paragraphRanges.map((range, index) => {
+		const props = extractRangeProperties(range);
+		const needsSample = safeNum((props.font as { fontSize?: number }).fontSize) === 0 && paragraphSpans[index].length > 0;
+		if (!needsSample) return null;
+		const sample = range.getSubstring(0, 1);
+		ctx.load(sample, "font/size");
+		return sample;
+	});
+	if (defaultSample || paragraphSamples.some(Boolean)) await ctx.sync();
+
+	if (defaultSample) {
+		const sampledSize = safeNum(defaultSample.font.size);
+		defaultProperties.font.fontSize = sampledSize > 0 ? sampledSize : await resolveInheritedFontSize(ctx, shape);
+	}
+
+	// A paragraph reporting the same mixed/unresolved sentinel (0) as the
+	// shape's own whole-range size has no run-level override either, so it
+	// inherits the same resolved size — without this, diffRangeProperties
+	// would surface a spurious fontSize:0 override once defaultProperties
+	// has been corrected above.
+	const paragraphProperties = paragraphRanges.map((range, index) => {
+		const props = extractRangeProperties(range);
+		if (safeNum((props.font as { fontSize?: number }).fontSize) === 0) {
+			const sample = paragraphSamples[index];
+			const sampledSize = sample ? safeNum(sample.font.size) : 0;
+			props.font.fontSize = sampledSize > 0 ? sampledSize : defaultProperties.font.fontSize;
+		}
+		return props;
+	});
+
+	// Dedup by content: identical diffs (even for non-adjacent
+	// paragraphs) share one groupId/propertyGroups entry.
+	const groupIdByDiffKey = new Map<string, number>();
+	const propertyGroups: { groupId: number; properties: Record<string, unknown> }[] = [];
+	const paragraphs = paragraphSpans.map((span, index) => {
+		const diff = diffRangeProperties(paragraphProperties[index], defaultProperties);
+		const diffKey = JSON.stringify(diff);
+		let groupId = groupIdByDiffKey.get(diffKey);
+		if (groupId === undefined) {
+			groupId = propertyGroups.length;
+			groupIdByDiffKey.set(diffKey, groupId);
+			propertyGroups.push({ groupId, properties: diff });
+		}
+		return { index, text: span.text, start: span.start, length: span.length, groupId };
+	});
+
+	return {
+		fullText,
+		defaultProperties,
+		propertyGroups,
+		paragraphs,
+	};
+}
+
 async function handleGetShapeParagraphs(args: unknown): Promise<unknown> {
 	const config = args as { slideIndex?: number; shapeId?: string };
 	const slideIndex = config.slideIndex ?? 1;
@@ -1059,97 +1167,10 @@ async function handleGetShapeParagraphs(args: unknown): Promise<unknown> {
 		if ("error" in resolved) return resolved;
 		const { shape } = resolved;
 
-		const tf = shape.getTextFrameOrNullObject();
-		ctx.load(tf, "isNullObject,textRange/text");
-		await ctx.sync();
+		const data = await getShapeParagraphsData(shape, ctx, `Shape '${shapeId}'`);
+		if ("error" in data) return data;
 
-		if (tf.isNullObject) {
-			return {
-				error: `Shape '${shapeId}' does not support text (type: image/table/etc)`,
-			};
-		}
-
-		const fullText = safeStr(tf.textRange.text);
-		const paragraphSpans = splitParagraphs(fullText);
-
-		// Batch: load the whole-range properties (the defaultProperties
-		// baseline) plus one getSubstring() range per paragraph, all in a
-		// single sync — mirrors handleGetTable's create-N-then-one-sync shape.
-		ctx.load(tf.textRange, TEXT_RANGE_PROP_PATH);
-		const paragraphRanges = paragraphSpans.map((span) => {
-			const range = tf.textRange.getSubstring(span.start, span.length);
-			ctx.load(range, TEXT_RANGE_PROP_PATH);
-			return range;
-		});
-		await ctx.sync();
-
-		const defaultProperties = extractRangeProperties(tf.textRange);
-
-		// PowerPoint's whole-range font.size getter can report the
-		// mixed/unresolved sentinel (0 after safeNum) even when every
-		// character in the range shares the same real, explicit size (seen
-		// live: an all-35pt title still reported the sentinel for the whole
-		// range and for a getSubstring() spanning its full length). Sample a
-		// single character — which reliably resolves — before falling back
-		// to the shape's layout-inherited size.
-		const needsDefaultSample = safeNum((defaultProperties.font as { fontSize?: number }).fontSize) === 0 && fullText.length > 0;
-		const defaultSample = needsDefaultSample ? tf.textRange.getSubstring(0, 1) : null;
-		if (defaultSample) ctx.load(defaultSample, "font/size");
-
-		const paragraphSamples = paragraphRanges.map((range, index) => {
-			const props = extractRangeProperties(range);
-			const needsSample = safeNum((props.font as { fontSize?: number }).fontSize) === 0 && paragraphSpans[index].length > 0;
-			if (!needsSample) return null;
-			const sample = range.getSubstring(0, 1);
-			ctx.load(sample, "font/size");
-			return sample;
-		});
-		if (defaultSample || paragraphSamples.some(Boolean)) await ctx.sync();
-
-		if (defaultSample) {
-			const sampledSize = safeNum(defaultSample.font.size);
-			defaultProperties.font.fontSize = sampledSize > 0 ? sampledSize : await resolveInheritedFontSize(ctx, shape);
-		}
-
-		// A paragraph reporting the same mixed/unresolved sentinel (0) as the
-		// shape's own whole-range size has no run-level override either, so it
-		// inherits the same resolved size — without this, diffRangeProperties
-		// would surface a spurious fontSize:0 override once defaultProperties
-		// has been corrected above.
-		const paragraphProperties = paragraphRanges.map((range, index) => {
-			const props = extractRangeProperties(range);
-			if (safeNum((props.font as { fontSize?: number }).fontSize) === 0) {
-				const sample = paragraphSamples[index];
-				const sampledSize = sample ? safeNum(sample.font.size) : 0;
-				props.font.fontSize = sampledSize > 0 ? sampledSize : defaultProperties.font.fontSize;
-			}
-			return props;
-		});
-
-		// Dedup by content: identical diffs (even for non-adjacent
-		// paragraphs) share one groupId/propertyGroups entry.
-		const groupIdByDiffKey = new Map<string, number>();
-		const propertyGroups: { groupId: number; properties: Record<string, unknown> }[] = [];
-		const paragraphs = paragraphSpans.map((span, index) => {
-			const diff = diffRangeProperties(paragraphProperties[index], defaultProperties);
-			const diffKey = JSON.stringify(diff);
-			let groupId = groupIdByDiffKey.get(diffKey);
-			if (groupId === undefined) {
-				groupId = propertyGroups.length;
-				groupIdByDiffKey.set(diffKey, groupId);
-				propertyGroups.push({ groupId, properties: diff });
-			}
-			return { index, text: span.text, start: span.start, length: span.length, groupId };
-		});
-
-		return {
-			slideIndex,
-			shapeId,
-			fullText,
-			defaultProperties,
-			propertyGroups,
-			paragraphs,
-		};
+		return { slideIndex, shapeId, ...data };
 	});
 }
 
@@ -2536,7 +2557,12 @@ async function handleAddImage(args: unknown): Promise<unknown> {
 		if (config.width !== undefined) options.width = config.width;
 		if (config.height !== undefined) options.height = config.height;
 
-		const picture = (slide.shapes as any).addPicture(base64Data, options);
+		// Office.js has no shape-creation primitive for pictures (no addPicture/addImage
+		// on PowerPoint.ShapeCollection) — the only image API is ShapeFill.setImage(),
+		// which paints a picture fill onto an existing shape. Use a borderless rectangle.
+		const picture: any = slide.shapes.addGeometricShape("Rectangle", options);
+		picture.fill.setImage(base64Data);
+		picture.lineFormat.visible = false;
 		picture.load("id,name");
 		await ctx.sync();
 
