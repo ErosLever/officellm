@@ -201,6 +201,24 @@ public static class McpToolEngine
         },
         new
         {
+            name = "powerpoint_get_table_cell",
+            description = "Reads one table cell's text and formatting: fill color, font (bold/italic/color/name/size), horizontal/vertical alignment, and per-side borders. Use this to verify cell-level formatting fidelity that powerpoint_get_table (text only) can't show.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
+                    ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
+                    ["shapeId"] = new { type = "string", description = "Shape ID of the table" },
+                    ["row"] = new { type = "integer", description = "0-based row index" },
+                    ["column"] = new { type = "integer", description = "0-based column index" }
+                },
+                required = new[] { "instanceId", "slideIndex", "shapeId", "row", "column" }
+            }
+        },
+        new
+        {
             name = "powerpoint_get_shape_paragraphs",
             description = "Returns a shape's text broken into paragraphs, each with its own start/length span and a groupId pointing into propertyGroups — a deduplicated list of font/paragraph/bullet property diffs against the shape's defaultProperties baseline (read from the whole text range). Use this to inspect per-paragraph formatting (e.g. differing indent levels or bullet styles) before targeting one paragraph with powerpoint_update_text_range_properties.",
             inputSchema = new
@@ -227,7 +245,8 @@ public static class McpToolEngine
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
                     ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
                     ["shapeId"] = new { type = "string", description = "Shape ID or name" },
-                    ["bulletChar"] = new { type = "string", description = "Marker for non-numbered paragraphs: '-' or '*'. Default: '-'." }
+                    ["bulletChar"] = new { type = "string", description = "Marker for non-numbered paragraphs: '-' or '*'. Default: '-'." },
+                    ["includeColor"] = new { type = "boolean", description = "Emit explicit '{RGB:#RRGGBB}...{/RGB}' tags around word-level color overrides that differ from their paragraph's own color. Off by default — most callers don't expect color markup in plain text output. Default: false." }
                 },
                 required = new[] { "instanceId", "slideIndex", "shapeId" }
             }
@@ -243,7 +262,8 @@ public static class McpToolEngine
                 {
                     ["instanceId"] = new { type = "string", description = "REQUIRED. The instance ID from office_get_active_apps." },
                     ["slideIndex"] = new { type = "integer", description = "1-based slide index (as shown in the PowerPoint UI)" },
-                    ["bulletChar"] = new { type = "string", description = "Marker for non-numbered paragraphs: '-' or '*'. Default: '-'." }
+                    ["bulletChar"] = new { type = "string", description = "Marker for non-numbered paragraphs: '-' or '*'. Default: '-'." },
+                    ["includeColor"] = new { type = "boolean", description = "Emit explicit '{RGB:#RRGGBB}...{/RGB}' tags around word-level color overrides that differ from their paragraph's own color. Off by default — most callers don't expect color markup in plain text output. Default: false." }
                 },
                 required = new[] { "instanceId", "slideIndex" }
             }
@@ -629,6 +649,28 @@ public static class McpToolEngine
                     ["targetInstanceId"] = new { type = "string", description = "Optional instance ID of a different open PowerPoint presentation to copy the slide into." }
                 },
                 required = new[] { "instanceId", "slideIndex" }
+            }
+        },
+        new
+        {
+            name = "powerpoint_copy_shape",
+            description = "Copies a shape (image, text box, geometric shape, line, table, or group) from one slide to another, in the same or a different open presentation. Reconstructs the shape's fill, line, text, and (for tables) per-cell formatting where possible; falls back to a flattened image copy for shape types or fill styles that Office.js cannot read back (e.g. geometric shape subtype, gradients/patterns). Returns the new shapeId plus a preservedFidelity indicator ('full', 'partial', or 'bitmap').",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["srcInstanceId"] = new { type = "string", description = "REQUIRED. Instance ID of the source presentation, from office_get_active_apps." },
+                    ["srcSlideIndex"] = new { type = "integer", description = "REQUIRED. 1-based index of the slide containing the shape to copy (as shown in the PowerPoint UI)." },
+                    ["srcShapeId"] = new { type = "string", description = "REQUIRED. Shape ID or name to copy." },
+                    ["dstInstanceId"] = new { type = "string", description = "Instance ID of the destination presentation. Default: same as srcInstanceId." },
+                    ["dstSlideIndex"] = new { type = "integer", description = "REQUIRED. 1-based index of the destination slide (as shown in the PowerPoint UI)." },
+                    ["dstLeft"] = new { type = "number", description = "Destination X position in points. Default: source shape's position, or centered on the destination slide if its dimensions differ from the source slide's." },
+                    ["dstTop"] = new { type = "number", description = "Destination Y position in points. Default: source shape's position, or centered as above." },
+                    ["dstWidth"] = new { type = "number", description = "Destination width in points. Default: source shape's width." },
+                    ["dstHeight"] = new { type = "number", description = "Destination height in points. Default: source shape's height." }
+                },
+                required = new[] { "srcInstanceId", "srcSlideIndex", "srcShapeId", "dstSlideIndex" }
             }
         },
 
@@ -1133,6 +1175,7 @@ public static class McpToolEngine
         "powerpoint_get_slide_image",
         "powerpoint_get_shape_image",
         "powerpoint_get_table",
+        "powerpoint_get_table_cell",
         "powerpoint_get_shape_paragraphs",
         "powerpoint_get_shape_text_markdown",
         "powerpoint_get_slide_text_markdown",
@@ -1156,6 +1199,9 @@ public static class McpToolEngine
         "powerpoint_duplicate_slide",
         "powerpoint_export_slide_internal", // internal-only: not in GetToolDefinitions(); used by cross-document duplicate_slide
         "powerpoint_import_slide_internal", // internal-only: not in GetToolDefinitions(); used by cross-document duplicate_slide
+        "powerpoint_copy_shape",
+        "powerpoint_get_shape_snapshot_internal", // internal-only: not in GetToolDefinitions(); used by copy_shape
+        "powerpoint_create_shape_from_snapshot_internal", // internal-only: not in GetToolDefinitions(); used by copy_shape
 
         // Word
         "word_get_outline",
@@ -1343,6 +1389,22 @@ public static class McpToolEngine
             }
         }
 
+        if (name == "powerpoint_copy_shape" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "srcInstanceId", "srcSlideIndex", "srcShapeId",
+                "dstInstanceId", "dstSlideIndex", "dstLeft", "dstTop", "dstWidth", "dstHeight");
+            if (unknownParamError != null)
+                return unknownParamError;
+
+            string? srcInstanceId = args.Value.TryGetProperty("srcInstanceId", out var siid) ? siid.GetString() : null;
+            string dstInstanceId = args.Value.TryGetProperty("dstInstanceId", out var diid) && !string.IsNullOrEmpty(diid.GetString())
+                ? diid.GetString()!
+                : srcInstanceId ?? "";
+
+            return await HandleCopyShape(srcInstanceId, dstInstanceId, args.Value);
+        }
+
         if (name == "powerpoint_set_slide_layout" && args.HasValue)
         {
             var unknownParamError = ValidateKnownParameters(args.Value, name,
@@ -1377,7 +1439,7 @@ public static class McpToolEngine
         if (name == "powerpoint_get_shape_text_markdown" && args.HasValue)
         {
             var unknownParamError = ValidateKnownParameters(args.Value, name,
-                "instanceId", "slideIndex", "shapeId", "bulletChar");
+                "instanceId", "slideIndex", "shapeId", "bulletChar", "includeColor");
             if (unknownParamError != null)
                 return unknownParamError;
         }
@@ -1385,7 +1447,7 @@ public static class McpToolEngine
         if (name == "powerpoint_get_slide_text_markdown" && args.HasValue)
         {
             var unknownParamError = ValidateKnownParameters(args.Value, name,
-                "instanceId", "slideIndex", "bulletChar");
+                "instanceId", "slideIndex", "bulletChar", "includeColor");
             if (unknownParamError != null)
                 return unknownParamError;
         }
@@ -1520,6 +1582,119 @@ public static class McpToolEngine
         var importResult = await DispatchRaw(targetInstanceId, "powerpoint_import_slide_internal", importArgs);
 
         return BuildToolResult(importResult, "powerpoint_duplicate_slide", targetInstanceId,
+            JsonSerializer.Serialize(args));
+    }
+
+    /// <summary>
+    /// Copies a shape from one slide to another (same or different open PowerPoint instance).
+    /// Always snapshots the source shape then rebuilds it on the destination, even when both
+    /// instances are the same, since shapes have no native copy primitive (unlike slides).
+    /// </summary>
+    private static async Task<object> HandleCopyShape(string? srcInstanceId, string dstInstanceId, JsonElement args)
+    {
+        if (string.IsNullOrEmpty(srcInstanceId))
+        {
+            return new ToolError(
+                "Missing required parameter: srcInstanceId. Call office_get_active_apps first to get the list of available instances.",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "srcInstanceId" }
+            ).ToMcpResponse();
+        }
+
+        if (string.IsNullOrEmpty(dstInstanceId))
+        {
+            return new ToolError(
+                "Missing required parameter: dstInstanceId (or srcInstanceId to default from).",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "dstInstanceId" }
+            ).ToMcpResponse();
+        }
+
+        if (_registry.GetInstance(srcInstanceId) == null)
+        {
+            return new ToolError(
+                $"Instance '{srcInstanceId}' is not registered or has timed out. Call office_get_active_apps to see current instances.",
+                ErrorCodes.INSTANCE_NOT_FOUND,
+                new { instanceId = srcInstanceId }
+            ).ToMcpResponse();
+        }
+
+        if (_registry.GetInstance(dstInstanceId) == null)
+        {
+            return new ToolError(
+                $"Instance '{dstInstanceId}' is not registered or has timed out. Call office_get_active_apps to see current instances.",
+                ErrorCodes.INSTANCE_NOT_FOUND,
+                new { instanceId = dstInstanceId }
+            ).ToMcpResponse();
+        }
+
+        if (!args.TryGetProperty("srcSlideIndex", out var ssiProp))
+        {
+            return new ToolError(
+                "Missing required parameter: srcSlideIndex.",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "srcSlideIndex" }
+            ).ToMcpResponse();
+        }
+        int srcSlideIndex = ssiProp.GetInt32();
+
+        if (!args.TryGetProperty("srcShapeId", out var sidProp) || string.IsNullOrEmpty(sidProp.GetString()))
+        {
+            return new ToolError(
+                "Missing required parameter: srcShapeId.",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "srcShapeId" }
+            ).ToMcpResponse();
+        }
+        string srcShapeId = sidProp.GetString()!;
+
+        if (!args.TryGetProperty("dstSlideIndex", out var dsiProp))
+        {
+            return new ToolError(
+                "Missing required parameter: dstSlideIndex.",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "dstSlideIndex" }
+            ).ToMcpResponse();
+        }
+        int dstSlideIndex = dsiProp.GetInt32();
+
+        var snapshotArgs = JsonSerializer.SerializeToElement(new { instanceId = srcInstanceId, slideIndex = srcSlideIndex, shapeId = srcShapeId });
+        var snapshotResult = await DispatchRaw(srcInstanceId, "powerpoint_get_shape_snapshot_internal", snapshotArgs);
+        if (snapshotResult == null || !snapshotResult.Success)
+        {
+            return new ToolError(
+                $"Failed to snapshot shape '{srcShapeId}' on slide {srcSlideIndex} of instance '{srcInstanceId}': {snapshotResult?.Error ?? "timed out"}",
+                snapshotResult == null ? ErrorCodes.TIMEOUT : ParseErrorCode(snapshotResult.Error),
+                new { srcInstanceId, srcSlideIndex, srcShapeId }
+            ).ToMcpResponse();
+        }
+
+        var snapshotPayload = JsonSerializer.SerializeToElement(snapshotResult.Payload);
+        if (!snapshotPayload.TryGetProperty("snapshot", out var snapshotProp))
+        {
+            var snapshotError = snapshotPayload.TryGetProperty("error", out var e) ? e.GetString() : "no snapshot returned";
+            return new ToolError(
+                $"Failed to snapshot shape '{srcShapeId}' on slide {srcSlideIndex} of instance '{srcInstanceId}': {snapshotError}",
+                ErrorCodes.INVALID_PARAMETER,
+                new { srcInstanceId, srcSlideIndex, srcShapeId }
+            ).ToMcpResponse();
+        }
+
+        var createArgsDict = new Dictionary<string, object?>
+        {
+            ["instanceId"] = dstInstanceId,
+            ["slideIndex"] = dstSlideIndex,
+            ["snapshot"] = JsonSerializer.Deserialize<object>(snapshotProp)
+        };
+        if (args.TryGetProperty("dstLeft", out var dl)) createArgsDict["dstLeft"] = dl.GetDouble();
+        if (args.TryGetProperty("dstTop", out var dt)) createArgsDict["dstTop"] = dt.GetDouble();
+        if (args.TryGetProperty("dstWidth", out var dw)) createArgsDict["dstWidth"] = dw.GetDouble();
+        if (args.TryGetProperty("dstHeight", out var dh)) createArgsDict["dstHeight"] = dh.GetDouble();
+
+        var createArgs = JsonSerializer.SerializeToElement(createArgsDict);
+        var createResult = await DispatchRaw(dstInstanceId, "powerpoint_create_shape_from_snapshot_internal", createArgs);
+
+        return BuildToolResult(createResult, "powerpoint_copy_shape", dstInstanceId,
             JsonSerializer.Serialize(args));
     }
 
@@ -1893,7 +2068,8 @@ public static class McpToolEngine
     }
 
     private static bool IsImageTool(string toolName) =>
-        toolName is "powerpoint_get_slide_image" or "powerpoint_get_shape_image" or "word_get_image";
+        toolName is "powerpoint_get_slide_image" or "powerpoint_get_shape_image" or "word_get_image"
+            or "powerpoint_get_shape_snapshot_internal" or "powerpoint_create_shape_from_snapshot_internal";
 
     private static string ParseErrorCode(string? error)
     {

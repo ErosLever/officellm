@@ -45,6 +45,9 @@ export async function processCommand(
 			case "powerpoint_get_table":
 				result = await handleGetTable(args);
 				break;
+			case "powerpoint_get_table_cell":
+				result = await handleGetTableCell(args);
+				break;
 			case "powerpoint_get_shape_paragraphs":
 				result = await handleGetShapeParagraphs(args);
 				break;
@@ -119,6 +122,12 @@ export async function processCommand(
 				break;
 			case "powerpoint_import_slide_internal":
 				result = await handleImportSlideInternal(args);
+				break;
+			case "powerpoint_get_shape_snapshot_internal":
+				result = await handleGetShapeSnapshotInternal(args);
+				break;
+			case "powerpoint_create_shape_from_snapshot_internal":
+				result = await handleCreateShapeFromSnapshotInternal(args);
 				break;
 
 			// Phase 18: Tags & Metadata
@@ -241,6 +250,88 @@ const PARAGRAPH_ALIGNMENT_NAMES = [
 	"JustifyLow",
 	"Distributed",
 	"ThaiDistributed",
+];
+
+const TEXT_VERTICAL_ALIGNMENT_NAMES = ["Top", "Middle", "Bottom", "TopCentered", "MiddleCentered", "BottomCentered"];
+
+// Declaration order of PowerPoint.TableStyle — see normalizeEnumString's comment
+// above for why this matters: table.styleSettings.style has been observed to
+// come back as a numeric-string enum index rather than the named string.
+const TABLE_STYLE_NAMES = [
+	"NoStyleNoGrid",
+	"ThemedStyle1Accent1",
+	"ThemedStyle1Accent2",
+	"ThemedStyle1Accent3",
+	"ThemedStyle1Accent4",
+	"ThemedStyle1Accent5",
+	"ThemedStyle1Accent6",
+	"NoStyleTableGrid",
+	"ThemedStyle2Accent1",
+	"ThemedStyle2Accent2",
+	"ThemedStyle2Accent3",
+	"ThemedStyle2Accent4",
+	"ThemedStyle2Accent5",
+	"ThemedStyle2Accent6",
+	"LightStyle1",
+	"LightStyle1Accent1",
+	"LightStyle1Accent2",
+	"LightStyle1Accent3",
+	"LightStyle1Accent4",
+	"LightStyle1Accent5",
+	"LightStyle1Accent6",
+	"LightStyle2",
+	"LightStyle2Accent1",
+	"LightStyle2Accent2",
+	"LightStyle2Accent3",
+	"LightStyle2Accent4",
+	"LightStyle2Accent5",
+	"LightStyle2Accent6",
+	"LightStyle3",
+	"LightStyle3Accent1",
+	"LightStyle3Accent2",
+	"LightStyle3Accent3",
+	"LightStyle3Accent4",
+	"LightStyle3Accent5",
+	"LightStyle3Accent6",
+	"MediumStyle1",
+	"MediumStyle1Accent1",
+	"MediumStyle1Accent2",
+	"MediumStyle1Accent3",
+	"MediumStyle1Accent4",
+	"MediumStyle1Accent5",
+	"MediumStyle1Accent6",
+	"MediumStyle2",
+	"MediumStyle2Accent1",
+	"MediumStyle2Accent2",
+	"MediumStyle2Accent3",
+	"MediumStyle2Accent4",
+	"MediumStyle2Accent5",
+	"MediumStyle2Accent6",
+	"MediumStyle3",
+	"MediumStyle3Accent1",
+	"MediumStyle3Accent2",
+	"MediumStyle3Accent3",
+	"MediumStyle3Accent4",
+	"MediumStyle3Accent5",
+	"MediumStyle3Accent6",
+	"MediumStyle4",
+	"MediumStyle4Accent1",
+	"MediumStyle4Accent2",
+	"MediumStyle4Accent3",
+	"MediumStyle4Accent4",
+	"MediumStyle4Accent5",
+	"MediumStyle4Accent6",
+	"DarkStyle1",
+	"DarkStyle1Accent1",
+	"DarkStyle1Accent2",
+	"DarkStyle1Accent3",
+	"DarkStyle1Accent4",
+	"DarkStyle1Accent5",
+	"DarkStyle1Accent6",
+	"DarkStyle2",
+	"DarkStyle2Accent1",
+	"DarkStyle2Accent2",
+	"DarkStyle2Accent3",
 ];
 
 const BULLET_TYPE_NAMES = ["Unsupported", "None", "Numbered", "Unnumbered"];
@@ -397,6 +488,11 @@ export function splitParagraphs(
 		}, []);
 }
 
+// Note: no "font/highlightColor" here — PowerPoint.ShapeFont (unlike
+// Word.Font) has no highlightColor property in Office.js at all, so a run's
+// text-highlight color can't be read or restored through this API. Text
+// copied via powerpoint_copy_shape will lose any highlight color the source
+// had; there is no workaround short of a new host API.
 const TEXT_RANGE_PROP_PATH = [
 	"font/name",
 	"font/size",
@@ -579,6 +675,30 @@ function diffRangeProperties(
 		},
 		{},
 	);
+}
+
+// Font/paragraph properties that aren't representable in the plain markdown
+// snapshot (see wrapInlineMarkers) — captured/reapplied directly via
+// applyRangeProperties instead, at both the shape-default and
+// per-paragraph-override level. `color`/`fontName`/`horizontalAlignment` use
+// "" and `fontSize` uses 0 as PowerPoint's "mixed/unresolved" sentinel (the
+// same convention getShapeParagraphsData's fontSize sampling already relies
+// on) — normalized to `undefined` here so a sentinel never reaches
+// applyDefinedProperties, which would otherwise write e.g. `font.color = ""`
+// and crash with InvalidArgument against a live document.
+type SideChannelTextProps = { color?: string; fontName?: string; fontSize?: number; horizontalAlignment?: string };
+
+function toSideChannelTextProps(
+	font: Record<string, unknown>,
+	paragraphFormat: Record<string, unknown>,
+): SideChannelTextProps | undefined {
+	const props: SideChannelTextProps = {
+		color: (font.color as string) || undefined,
+		fontName: (font.fontName as string) || undefined,
+		fontSize: (font.fontSize as number) || undefined,
+		horizontalAlignment: (paragraphFormat.horizontalAlignment as string) || undefined,
+	};
+	return Object.values(props).some((v) => v !== undefined) ? props : undefined;
 }
 
 /**
@@ -824,20 +944,24 @@ async function handleGetSlide(args: unknown): Promise<unknown> {
 		}
 		await ctx.sync();
 
-		// Step 3.5: PowerPoint's whole-range font.size getter can report the
-		// mixed/unresolved sentinel (0 after safeNum) even when every
-		// character in the range shares the same real, explicit size (seen
-		// live: an all-35pt title still reported the sentinel for the whole
-		// range). Sample a single character for any text frame hitting the
-		// sentinel before falling back to the shape's layout-inherited size.
+		// Step 3.5: PowerPoint's whole-range font getters can report a
+		// mixed/unresolved value whenever bold/italic/color isn't uniform
+		// across the whole range — reliably so for size (the 0 sentinel), but
+		// bold/italic/color have no equivalent clean sentinel (false/"" are
+		// also valid real values), so the whole-range read can silently
+		// misreport a shape whose formatting isn't uniform throughout. A
+		// single-character substring is never mixed, so sample the first
+		// character of every non-empty text frame unconditionally and prefer
+		// that reading for bold/italic/color; size still falls back further
+		// to the shape's layout-inherited size when even the sample is 0.
 		const sampleByIndex = new Map<number, any>();
 		for (let i = 0; i < textFrameData.length; i++) {
 			const tf = textFrameData[i];
 			if (tf.isNullObject || !tf.textRange?.font) continue;
 			const text = safeStr(tf.textRange.text);
-			if (safeNum(tf.textRange.font.size) === 0 && text.length > 0) {
+			if (text.length > 0) {
 				const sample = tf.textRange.getSubstring(0, 1);
-				ctx.load(sample, "font/size");
+				ctx.load(sample, "font/size,font/bold,font/italic,font/color");
 				sampleByIndex.set(i, sample);
 			}
 		}
@@ -857,20 +981,19 @@ async function handleGetSlide(args: unknown): Promise<unknown> {
 			if (!tf.isNullObject) {
 				text = safeStr(tf.textRange?.text);
 				if (tf.textRange?.font) {
-					let size = safeNum(tf.textRange.font.size);
-					if (size === 0) {
-						const sample = sampleByIndex.get(i);
-						size = sample ? safeNum(sample.font.size) : 0;
-					}
+					const sample = sampleByIndex.get(i);
+
+					let size = sample ? safeNum(sample.font.size) : safeNum(tf.textRange.font.size);
 					if (size === 0) {
 						size = await resolveInheritedFontSize(ctx, s);
 					}
+
 					font = {
 						name: safeStr(tf.textRange.font.name),
 						size,
-						bold: !!tf.textRange.font.bold,
-						italic: !!tf.textRange.font.italic,
-						color: safeStr(tf.textRange.font.color),
+						bold: sample ? !!sample.font.bold : !!tf.textRange.font.bold,
+						italic: sample ? !!sample.font.italic : !!tf.textRange.font.italic,
+						color: sample ? safeStr(sample.font.color) : safeStr(tf.textRange.font.color),
 					};
 				}
 			}
@@ -1052,6 +1175,111 @@ async function handleGetTable(args: unknown): Promise<unknown> {
 	});
 }
 
+async function handleGetTableCell(args: unknown): Promise<unknown> {
+	const config = args as { slideIndex?: number; shapeId?: string; row?: number; column?: number };
+	const slideIndex = config.slideIndex ?? 1;
+	const shapeId = config.shapeId ?? "";
+	const row = config.row ?? 0;
+	const column = config.column ?? 0;
+
+	return runInPowerPoint(async (ctx) => {
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
+		slide.load("shapes/items/$none");
+		await ctx.sync();
+
+		let targetShape: any = null;
+		for (const s of slide.shapes.items) {
+			s.load("id,name,type");
+		}
+		await ctx.sync();
+
+		for (const s of slide.shapes.items) {
+			if (safeStr(s.id) === shapeId || safeStr(s.name) === shapeId) {
+				targetShape = s;
+				break;
+			}
+		}
+
+		if (!targetShape) {
+			return { error: `Shape '${shapeId}' not found on slide ${slideIndex}` };
+		}
+
+		const table = targetShape.getTable();
+		table.load("rowCount,columnCount");
+		await ctx.sync();
+
+		if (row < 0 || row >= table.rowCount || column < 0 || column >= table.columnCount) {
+			return { error: `Cell (${row}, ${column}) is out of range for a ${table.rowCount}x${table.columnCount} table` };
+		}
+
+		const cell = table.getCellOrNullObject(row, column);
+		ctx.load(
+			cell,
+			"text,fill/type,fill/foregroundColor,font/bold,font/italic,font/color,font/name,font/size," +
+				"horizontalAlignment,verticalAlignment," +
+				"borders/top/color,borders/top/weight,borders/top/dashStyle," +
+				"borders/bottom/color,borders/bottom/weight,borders/bottom/dashStyle," +
+				"borders/left/color,borders/left/weight,borders/left/dashStyle," +
+				"borders/right/color,borders/right/weight,borders/right/dashStyle,textRuns",
+		);
+		await ctx.sync();
+
+		// TableCell.font.* returns the "mixed" sentinel (empty/false/unresolved) even
+		// for a cell whose single text run has one explicit format — see the same
+		// fallback in getShapeSnapshot's Table branch. Re-request textRuns unconditionally
+		// since bold/italic/color have no clean "unresolved" sentinel of their own.
+		const run = cell.text ? cell.textRuns?.[0] : undefined;
+		const fallback = run?.font;
+
+		const fmt: CellFormat = {};
+		const cellFillType = safeStr(cell.fill?.type);
+		let fillSkipped = false;
+		if (cellFillType === "Solid") {
+			fmt.fillColor = safeStr(cell.fill.foregroundColor);
+		} else if (cellFillType && cellFillType !== "NoFill") {
+			fillSkipped = true;
+		}
+		if (cell.font?.bold || fallback?.bold) fmt.bold = true;
+		if (cell.font?.italic || fallback?.italic) fmt.italic = true;
+		const cellColor = safeStr(cell.font?.color) || safeStr(fallback?.color);
+		if (cellColor) fmt.color = cellColor;
+		const fontSize = safeNum(cell.font?.size) || safeNum(fallback?.size);
+		if (fontSize > 0) fmt.fontSize = fontSize;
+		const fontName = safeStr(cell.font?.name) || safeStr(fallback?.name);
+		if (fontName) fmt.fontName = fontName;
+		if (cell.horizontalAlignment) {
+			fmt.horizontalAlignment = normalizeEnumString(safeStr(cell.horizontalAlignment), PARAGRAPH_ALIGNMENT_NAMES);
+		}
+		if (cell.verticalAlignment) {
+			fmt.verticalAlignment = normalizeEnumString(safeStr(cell.verticalAlignment), TEXT_VERTICAL_ALIGNMENT_NAMES);
+		}
+		const borders: { top?: CellBorder; bottom?: CellBorder; left?: CellBorder; right?: CellBorder } = {};
+		(["top", "bottom", "left", "right"] as const).forEach((side) => {
+			const b = cell.borders?.[side];
+			if (!b) return;
+			const border: CellBorder = {};
+			if (b.color) border.color = safeStr(b.color);
+			const weight = safeNum(b.weight);
+			if (weight > 0) border.weight = weight;
+			if (b.dashStyle) border.dashStyle = safeStr(b.dashStyle);
+			if (Object.keys(border).length > 0) borders[side] = border;
+		});
+		if (Object.keys(borders).length > 0) fmt.borders = borders;
+
+		return {
+			slideIndex,
+			shapeId,
+			row,
+			column,
+			text: safeStr(cell.text),
+			format: fmt,
+			fillSkipped,
+		};
+	});
+}
+
 /**
  * Core of handleGetShapeParagraphs, operating on an already-resolved shape
  * rather than re-resolving by slideIndex/shapeId — shared with the shape
@@ -1180,6 +1408,7 @@ export type InlineRun = {
 	bold: boolean;
 	italic: boolean;
 	strikethrough: boolean;
+	color?: string;
 };
 
 // Relative priority of each marker character in the fixed nesting order:
@@ -1203,8 +1432,18 @@ function unescapeMarkers(s: string): string {
  * -> "*_~text~_*"), and backslash-escapes literal `*`/`_`/`~` everywhere
  * else so they round-trip through `parseInlineMarkers` as plain characters.
  * `runs` must be sorted by `start` and non-overlapping.
+ *
+ * Word-level color is opt-in (`options.includeColor`) and, when enabled,
+ * wraps outermost as `{RGB:#RRGGBB}...{/RGB}` — a regular markdown consumer
+ * never sees it unless they explicitly ask for it, since untagged color is
+ * already applied directly to the shape/paragraph (see snapshot.defaultColor
+ * / paragraphColors) without going through markdown at all.
  */
-export function wrapInlineMarkers(text: string, runs: InlineRun[]): string {
+export function wrapInlineMarkers(
+	text: string,
+	runs: InlineRun[],
+	options: { includeColor?: boolean } = {},
+): string {
 	let out = "";
 	let cursor = 0;
 	for (const run of runs) {
@@ -1213,12 +1452,21 @@ export function wrapInlineMarkers(text: string, runs: InlineRun[]): string {
 		if (run.strikethrough) wrapped = `~${wrapped}~`;
 		if (run.italic) wrapped = `_${wrapped}_`;
 		if (run.bold) wrapped = `*${wrapped}*`;
+		if (options.includeColor && run.color) wrapped = `{RGB:${run.color}}${wrapped}{/RGB}`;
 		out += wrapped;
 		cursor = run.start + run.length;
 	}
 	out += escapeMarkers(text.slice(cursor));
 	return out;
 }
+
+// Optional, explicit-only word-level color tag (see wrapInlineMarkers'
+// `options.includeColor`) — deliberately more verbose than the *_~ markers
+// so it never appears in default markdown output and is unmistakable when
+// it does. Wraps outermost around a run's *_~ stack, e.g.
+// "{RGB:#FF0000}*_~text~_*{/RGB}".
+const COLOR_OPEN_RE = /^\{RGB:(#[0-9a-fA-F]{6})\}/;
+const COLOR_CLOSE = "{/RGB}";
 
 // Finds the first occurrence of `marker` at or after `from` that isn't
 // preceded by a backslash escape.
@@ -1253,6 +1501,29 @@ export function parseInlineMarkers(text: string): { text: string; runs: InlineRu
 			out += text[i + 1];
 			i += 2;
 			continue;
+		}
+
+		// Optional word-level color tag, checked before the *_~ markers since
+		// it wraps outermost around them. Only recognized when a matching
+		// {/RGB} close exists later in the string — otherwise it's left as
+		// plain literal text, same "don't hard-error on ambiguous input"
+		// posture as the *_~ markers below.
+		const colorMatch = ch === "{" ? text.slice(i).match(COLOR_OPEN_RE) : null;
+		if (colorMatch) {
+			const openLen = colorMatch[0].length;
+			const closeIndex = text.indexOf(COLOR_CLOSE, i + openLen);
+			if (closeIndex !== -1) {
+				const { text: innerText, runs: innerRuns } = parseInlineMarkers(text.slice(i + openLen, closeIndex));
+				const base = out.length;
+				if (innerRuns.length > 0) {
+					for (const r of innerRuns) runs.push({ ...r, start: base + r.start, color: colorMatch[1] });
+				} else {
+					runs.push({ start: base, length: innerText.length, bold: false, italic: false, strikethrough: false, color: colorMatch[1] });
+				}
+				out += innerText;
+				i = closeIndex + COLOR_CLOSE.length;
+				continue;
+			}
 		}
 
 		if (ch !== "*" && ch !== "_" && ch !== "~") {
@@ -1384,6 +1655,7 @@ function paragraphLineToMarkdown(
 	defaultProperties: RangeProperties,
 	bulletChar: string,
 	levelState: BulletLevelState[],
+	includeColor = false,
 ): string {
 	const diff = diffByGroupId.get(p.groupId) ?? {};
 	const defaultPf = defaultProperties.paragraphFormat as {
@@ -1401,9 +1673,21 @@ function paragraphLineToMarkdown(
 	const count = isNumbered && prev?.wasNumbered && prev.style === bulletStyle ? prev.count + 1 : 1;
 	levelState[indentLevel] = { count, wasNumbered: isNumbered, style: bulletStyle };
 
+	const text = wrapInlineMarkers(p.text, runs, { includeColor });
+	// bulletType "None" (plain paragraph) must render without a marker — otherwise
+	// plain text and real "-"/"*" bullets are indistinguishable in the markdown output.
+	if (bulletType === "None") {
+		// A paragraph whose own text starts with a literal space (e.g. manually
+		// typed code indentation) would otherwise be indistinguishable from one
+		// more indentLevel once splitIndent parses the line back — escape it with
+		// a leading backslash so markdownToParagraphSpecs can tell "text starts
+		// with a space" apart from "deeper indent".
+		const escaped = text.startsWith(" ") ? "\\" + text : text;
+		return "  ".repeat(indentLevel) + escaped;
+	}
+
 	const info = BULLET_STYLE_INFO[bulletStyle];
 	const marker = !isNumbered ? bulletChar : info ? formatBulletMarker(info.family, info.wrapper, count) : `${count}.`;
-	const text = wrapInlineMarkers(p.text, runs);
 	return "  ".repeat(indentLevel) + marker + " " + text;
 }
 
@@ -1411,10 +1695,11 @@ export function paragraphsToMarkdown(
 	paragraphs: { text: string; groupId: number }[],
 	propertyGroups: { groupId: number; properties: Record<string, any> }[],
 	defaultProperties: RangeProperties,
-	options: { bulletChar?: string } = {},
+	options: { bulletChar?: string; includeColor?: boolean } = {},
 	wordRuns: InlineRun[][] = [],
 ): string {
 	const bulletChar = options.bulletChar ?? "-";
+	const includeColor = options.includeColor ?? false;
 	const diffByGroupId = new Map(propertyGroups.map((g) => [g.groupId, g.properties]));
 
 	// Running per-indent-level numbering state, indexed by level. Truncated
@@ -1425,7 +1710,7 @@ export function paragraphsToMarkdown(
 	const levelState: BulletLevelState[] = [];
 
 	return paragraphs
-		.map((p, index) => paragraphLineToMarkdown(p, wordRuns[index] ?? [], diffByGroupId, defaultProperties, bulletChar, levelState))
+		.map((p, index) => paragraphLineToMarkdown(p, wordRuns[index] ?? [], diffByGroupId, defaultProperties, bulletChar, levelState, includeColor))
 		.join("\n");
 }
 
@@ -1443,10 +1728,11 @@ export function shapeParagraphsToSlideMarkdown(
 	propertyGroups: { groupId: number; properties: Record<string, any> }[],
 	defaultProperties: RangeProperties,
 	isFootnote: boolean,
-	options: { bulletChar?: string } = {},
+	options: { bulletChar?: string; includeColor?: boolean } = {},
 	wordRuns: InlineRun[][] = [],
 ): string {
 	const bulletChar = options.bulletChar ?? "-";
+	const includeColor = options.includeColor ?? false;
 	const diffByGroupId = new Map(propertyGroups.map((g) => [g.groupId, g.properties]));
 	const defaultFontSize = safeNum((defaultProperties.font as { fontSize?: number } | undefined)?.fontSize, 0);
 	const levelState: BulletLevelState[] = [];
@@ -1459,10 +1745,10 @@ export function shapeParagraphsToSlideMarkdown(
 
 			if (isHeadingSize(fontSize)) {
 				levelState.length = 0;
-				return "# " + wrapInlineMarkers(p.text, runs);
+				return "# " + wrapInlineMarkers(p.text, runs, { includeColor });
 			}
 
-			const line = paragraphLineToMarkdown(p, runs, diffByGroupId, defaultProperties, bulletChar, levelState);
+			const line = paragraphLineToMarkdown(p, runs, diffByGroupId, defaultProperties, bulletChar, levelState, includeColor);
 			return isFootnote ? "[^1] " + line : line;
 		})
 		.join("\n");
@@ -1479,21 +1765,30 @@ async function loadWordRuns(
 	tf: PowerPoint.TextFrame,
 	paragraphSpans: { text: string; start: number; length: number }[],
 	ctx: PowerPoint.RequestContext,
+	includeColor = false,
+	// Effective color already applied at the shape-default/paragraph-override
+	// level (see snapshot.defaultColor/paragraphColors and paragraphLineToMarkdown's
+	// `includeColor` path) — a word matching its paragraph's baseline needs no
+	// {RGB:...} tag of its own, since that color is already accounted for
+	// outside markdown entirely.
+	paragraphBaselineColors: (string | undefined)[] = [],
 ): Promise<InlineRun[][]> {
 	const wordSpansByParagraph = paragraphSpans.map((span) =>
 		[...span.text.matchAll(/\S+/g)].map((m) => ({ start: m.index as number, length: m[0].length })),
 	);
 
+	const loadPath = includeColor ? "font/bold,font/italic,font/strikethrough,font/color" : "font/bold,font/italic,font/strikethrough";
 	const wordRangesByParagraph = wordSpansByParagraph.map((wordSpans, pIndex) =>
 		wordSpans.map((word) => {
 			const range = tf.textRange.getSubstring(paragraphSpans[pIndex].start + word.start, word.length);
-			ctx.load(range, "font/bold,font/italic,font/strikethrough");
+			ctx.load(range, loadPath);
 			return range;
 		}),
 	);
 	await ctx.sync();
 
 	return wordSpansByParagraph.map((wordSpans, pIndex) => {
+		const baseline = paragraphBaselineColors[pIndex];
 		const runs: InlineRun[] = [];
 		let lastWordIndex = -1;
 		wordSpans.forEach((word, wIndex) => {
@@ -1501,18 +1796,21 @@ async function loadWordRuns(
 			const bold = !!range.font.bold;
 			const italic = !!range.font.italic;
 			const strikethrough = !!range.font.strikethrough;
+			const wordColor = includeColor ? safeStr(range.font.color) || undefined : undefined;
+			const color = wordColor && wordColor !== baseline ? wordColor : undefined;
 			const last = runs[runs.length - 1];
 			if (
 				last &&
 				lastWordIndex === wIndex - 1 &&
 				last.bold === bold &&
 				last.italic === italic &&
-				last.strikethrough === strikethrough
+				last.strikethrough === strikethrough &&
+				last.color === color
 			) {
 				last.length = word.start + word.length - last.start;
 				lastWordIndex = wIndex;
-			} else if (bold || italic || strikethrough) {
-				runs.push({ start: word.start, length: word.length, bold, italic, strikethrough });
+			} else if (bold || italic || strikethrough || color) {
+				runs.push({ start: word.start, length: word.length, bold, italic, strikethrough, color });
 				lastWordIndex = wIndex;
 			}
 		});
@@ -1520,11 +1818,26 @@ async function loadWordRuns(
 	});
 }
 
+// Effective color for each paragraph (its own diff override, else the
+// shape's default) — the baseline loadWordRuns compares word-level color
+// against, so a word that merely matches its paragraph's already-applied
+// color doesn't get a redundant {RGB:...} tag.
+function paragraphBaselineColors(
+	paragraphs: { groupId: number }[],
+	propertyGroups: { groupId: number; properties: Record<string, any> }[],
+	defaultProperties: RangeProperties,
+): (string | undefined)[] {
+	const diffByGroupId = new Map(propertyGroups.map((g) => [g.groupId, g.properties]));
+	const defaultColor = (defaultProperties.font as { color?: string } | undefined)?.color;
+	return paragraphs.map((p) => diffByGroupId.get(p.groupId)?.font?.color ?? defaultColor);
+}
+
 async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
-	const config = args as { slideIndex?: number; shapeId?: string; bulletChar?: string };
+	const config = args as { slideIndex?: number; shapeId?: string; bulletChar?: string; includeColor?: boolean };
 	const slideIndex = config.slideIndex ?? 1;
 	const shapeId = config.shapeId ?? "";
 	const bulletChar = config.bulletChar ?? "-";
+	const includeColor = config.includeColor ?? false;
 
 	if (bulletChar !== "-" && bulletChar !== "*") {
 		return { error: `bulletChar must be '-' or '*', got '${bulletChar}'` };
@@ -1540,14 +1853,20 @@ async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
 		ctx.load(tf, "isNullObject");
 		await ctx.sync();
 		if (tf.isNullObject) return [];
-		return loadWordRuns(tf, splitParagraphs(result.fullText), ctx);
+		return loadWordRuns(
+			tf,
+			splitParagraphs(result.fullText),
+			ctx,
+			includeColor,
+			paragraphBaselineColors(result.paragraphs, result.propertyGroups, result.defaultProperties),
+		);
 	});
 
 	const markdown = paragraphsToMarkdown(
 		result.paragraphs,
 		result.propertyGroups,
 		result.defaultProperties,
-		{ bulletChar },
+		{ bulletChar, includeColor },
 		wordRuns,
 	);
 
@@ -1555,9 +1874,10 @@ async function handleGetShapeTextMarkdown(args: unknown): Promise<unknown> {
 }
 
 async function handleGetSlideTextMarkdown(args: unknown): Promise<unknown> {
-	const config = args as { slideIndex?: number; bulletChar?: string };
+	const config = args as { slideIndex?: number; bulletChar?: string; includeColor?: boolean };
 	const slideIndex = config.slideIndex ?? 1;
 	const bulletChar = config.bulletChar ?? "-";
+	const includeColor = config.includeColor ?? false;
 
 	if (bulletChar !== "-" && bulletChar !== "*") {
 		return { error: `bulletChar must be '-' or '*', got '${bulletChar}'` };
@@ -1621,14 +1941,27 @@ async function handleGetSlideTextMarkdown(args: unknown): Promise<unknown> {
 			ctx.load(tf, "isNullObject");
 			await ctx.sync();
 			if (tf.isNullObject) return [];
-			return loadWordRuns(tf, splitParagraphs(result.fullText), ctx);
+			return loadWordRuns(
+				tf,
+				splitParagraphs(result.fullText),
+				ctx,
+				includeColor,
+				paragraphBaselineColors(result.paragraphs, result.propertyGroups, result.defaultProperties),
+			);
 		});
 
 		const defaultFontSize = safeNum((result.defaultProperties.font as { fontSize?: number } | undefined)?.fontSize, 0);
 		const isFootnote = isFootnoteShape({ top: shape.top, height: shape.height, fontSize: defaultFontSize }, slideHeight);
 
 		blocks.push(
-			shapeParagraphsToSlideMarkdown(result.paragraphs, result.propertyGroups, result.defaultProperties, isFootnote, { bulletChar }, wordRuns),
+			shapeParagraphsToSlideMarkdown(
+				result.paragraphs,
+				result.propertyGroups,
+				result.defaultProperties,
+				isFootnote,
+				{ bulletChar, includeColor },
+				wordRuns,
+			),
 		);
 	}
 
@@ -1763,7 +2096,11 @@ export function markdownToParagraphSpecs(markdown: string): ParagraphSpec[] | { 
 
 	for (let i = 0; i < lines.length; i++) {
 		const lineNo = i + 1;
-		const { indentLevel, rest } = splitIndent(lines[i]);
+		const { indentLevel, rest: rawRest } = splitIndent(lines[i]);
+		// A lone "\" immediately before a space is paragraphLineToMarkdown's
+		// escape for "this leading space is real paragraph text, not another
+		// indentLevel" (see there) — drop just the backslash, keep the space.
+		const rest = rawRest.startsWith("\\ ") ? rawRest.slice(1) : rawRest;
 		levelSlots.length = Math.min(levelSlots.length, indentLevel + 1);
 
 		const asPlain = () => {
@@ -2462,6 +2799,7 @@ async function handleSetShapeTextMarkdown(args: unknown): Promise<unknown> {
 						bold: run.bold || undefined,
 						italic: run.italic || undefined,
 						strikethrough: run.strikethrough || undefined,
+						color: run.color,
 					},
 					wordRange,
 					ctx,
@@ -3379,5 +3717,768 @@ async function handleUngroupShape(args: unknown): Promise<unknown> {
 		await ctx.sync();
 
 		return { slideIndex, shapeId, ungrouped: true, undoable: true };
+	});
+}
+
+// ── powerpoint_copy_shape: snapshot capture ─────────────────────
+
+// Placeholder is reconstructed as a plain TextBox stand-in (Office.js has no
+// addPlaceholder primitive) — see buildShapeFromSnapshot's Placeholder branch.
+const RECONSTRUCTABLE_TYPES = new Set(["TextBox", "Placeholder", "Line", "Table", "Group"]);
+
+// ShapeGetImageOptions.width/height count pixels, while a shape's own
+// width/height are in points — capturing at 1 pixel per point renders at
+// ~72dpi, so any fine detail (small text in a screenshot, thin lines) is lost.
+// Scale the capture up to a more typical screen density before downstream code
+// fits it back into the original point-sized bounding box.
+const BITMAP_CAPTURE_SCALE = 4;
+
+type ShapeSnapshot = {
+	type: string;
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+	rotation: number;
+	name: string;
+	altTextTitle: string;
+	altTextDescription: string;
+	isDecorative: boolean;
+	fill?: { type: string; color: string; transparency: number };
+	fillUnreadable?: boolean;
+	line?: { color: string; style: string | null; weight: number | null; visible: boolean | null; dashStyle: string | null };
+	textMarkdown?: string;
+	defaultTextProps?: SideChannelTextProps;
+	paragraphTextProps?: (SideChannelTextProps | undefined)[];
+	textFrame?: { autoSizeSetting: string; wordWrap: boolean; verticalAlignment: string; topMargin: number; bottomMargin: number; leftMargin: number; rightMargin: number };
+	table?: {
+		rowCount: number;
+		columnCount: number;
+		cells: string[][];
+		cellFormats: (CellFormat | null)[][];
+		anySkippedFill: boolean;
+		rowHeights: number[];
+		styleSettings?: TableStyleSettingsSnapshot;
+	};
+	children?: ShapeSnapshot[];
+	bitmap?: string;
+};
+
+type CellBorder = { color?: string; weight?: number; dashStyle?: string };
+type CellFormat = {
+	fillColor?: string;
+	bold?: boolean;
+	italic?: boolean;
+	color?: string;
+	fontSize?: number;
+	fontName?: string;
+	horizontalAlignment?: string;
+	verticalAlignment?: string;
+	borders?: { top?: CellBorder; bottom?: CellBorder; left?: CellBorder; right?: CellBorder };
+};
+
+// Table built-in style banding/highlighting (e.g. a shaded row right after the
+// header, or an exception on the first column of a highlighted last row) is
+// driven by Table.styleSettings, not by per-cell fills — capture/reapply it
+// alongside the explicit per-cell formats above.
+type TableStyleSettingsSnapshot = {
+	style?: string;
+	areRowsBanded?: boolean;
+	areColumnsBanded?: boolean;
+	isFirstRowHighlighted?: boolean;
+	isLastRowHighlighted?: boolean;
+	isFirstColumnHighlighted?: boolean;
+	isLastColumnHighlighted?: boolean;
+};
+
+/**
+ * Captures one shape (recursively, for Group children) into the transport
+ * format consumed by buildShapeFromSnapshot. Dispatches on shape.type per
+ * the plan: TextBox/Line/Table/Group are reconstructed property-by-property;
+ * everything else (including GeometricShape, which has no readable subtype)
+ * falls back to a flattened bitmap.
+ */
+async function snapshotShape(shape: PowerPoint.Shape, ctx: PowerPoint.RequestContext): Promise<ShapeSnapshot> {
+	shape.load([
+		"type", "left", "top", "width", "height", "rotation",
+		"name", "altTextTitle", "altTextDescription", "isDecorative",
+	]);
+	const fill: any = shape.fill;
+	ctx.load(fill, "type,foregroundColor,transparency");
+	const line: any = shape.lineFormat;
+	ctx.load(line, "color,style,weight,visible,dashStyle");
+	await ctx.sync();
+
+	const type = safeStr(shape.type);
+	const base = {
+		type,
+		left: safeNum(shape.left),
+		top: safeNum(shape.top),
+		width: safeNum(shape.width),
+		height: safeNum(shape.height),
+		rotation: safeNum(shape.rotation),
+		name: safeStr(shape.name),
+		altTextTitle: safeStr(shape.altTextTitle),
+		altTextDescription: safeStr(shape.altTextDescription),
+		isDecorative: !!shape.isDecorative,
+	};
+
+	const fillType = safeStr(fill.type);
+	const snapshot: ShapeSnapshot = {
+		...base,
+		line: {
+			color: safeStr(line.color),
+			style: line.style ?? null,
+			weight: line.weight ?? null,
+			visible: line.visible ?? null,
+			dashStyle: line.dashStyle ?? null,
+		},
+	};
+	if (fillType === "NoFill") {
+		// no fill field — build step leaves the new shape's default fill untouched
+	} else if (fillType === "Solid") {
+		snapshot.fill = { type: fillType, color: safeStr(fill.foregroundColor), transparency: safeNum(fill.transparency) };
+	} else {
+		snapshot.fillUnreadable = true;
+	}
+
+	if (!RECONSTRUCTABLE_TYPES.has(type) || ((type === "TextBox" || type === "Placeholder") && snapshot.fillUnreadable)) {
+		// width/height on ShapeGetImageOptions are a pixel count, but base.width/height
+		// are in points (72/inch) — a 1:1 request renders at ~72dpi, which turns any
+		// text inside the source shape (e.g. a screenshot) into an unreadable smear.
+		// Oversample so it stays legible; Office.js clamps to its own max supported
+		// size if this ever asks for too much.
+		const imageResult = shape.getImageAsBase64({
+			width: Math.round(base.width * BITMAP_CAPTURE_SCALE),
+			height: Math.round(base.height * BITMAP_CAPTURE_SCALE),
+		});
+		await ctx.sync();
+		return { ...base, bitmap: imageResult.value };
+	}
+
+	if (type === "TextBox" || type === "Placeholder") {
+		const tf: any = shape.getTextFrameOrNullObject();
+		ctx.load(tf, "isNullObject,autoSizeSetting,wordWrap,verticalAlignment,topMargin,bottomMargin,leftMargin,rightMargin");
+		await ctx.sync();
+		if (!tf.isNullObject) {
+			snapshot.textFrame = {
+				autoSizeSetting: safeStr(tf.autoSizeSetting),
+				wordWrap: !!tf.wordWrap,
+				verticalAlignment: safeStr(tf.verticalAlignment),
+				topMargin: safeNum(tf.topMargin),
+				bottomMargin: safeNum(tf.bottomMargin),
+				leftMargin: safeNum(tf.leftMargin),
+				rightMargin: safeNum(tf.rightMargin),
+			};
+			const paragraphData = await getShapeParagraphsData(shape, ctx, "Shape");
+			if (!("error" in paragraphData)) {
+				const paragraphSpans = splitParagraphs(paragraphData.fullText);
+				const wordRuns = await loadWordRuns(tf, paragraphSpans, ctx);
+				snapshot.textMarkdown = paragraphsToMarkdown(
+					paragraphData.paragraphs,
+					paragraphData.propertyGroups,
+					paragraphData.defaultProperties,
+					{},
+					wordRuns,
+				);
+
+				snapshot.defaultTextProps = toSideChannelTextProps(
+					paragraphData.defaultProperties.font,
+					paragraphData.defaultProperties.paragraphFormat,
+				);
+				const diffByGroupId = new Map(paragraphData.propertyGroups.map((g) => [g.groupId, g.properties]));
+				snapshot.paragraphTextProps = paragraphData.paragraphs.map((p) => {
+					const diff = diffByGroupId.get(p.groupId);
+					if (!diff) return undefined;
+					return toSideChannelTextProps(
+						(diff.font as Record<string, unknown>) ?? {},
+						(diff.paragraphFormat as Record<string, unknown>) ?? {},
+					);
+				});
+			}
+		}
+		return snapshot;
+	}
+
+	if (type === "Table") {
+		const table: any = shape.getTable();
+		table.load("rowCount,columnCount");
+		table.rows.load("currentHeight");
+		const styleSettings: any = table.styleSettings;
+		ctx.load(styleSettings, "style,areRowsBanded,areColumnsBanded,isFirstRowHighlighted,isLastRowHighlighted,isFirstColumnHighlighted,isLastColumnHighlighted");
+		await ctx.sync();
+		const rows = table.rowCount;
+		const cols = table.columnCount;
+		const rowHeights = table.rows.items.map((row: any) => row.currentHeight);
+
+		const cellRefs: any[] = [];
+		for (let r = 0; r < rows; r++) {
+			for (let c = 0; c < cols; c++) {
+				const cell = table.getCellOrNullObject(r, c);
+				ctx.load(
+					cell,
+					"text,fill/type,fill/foregroundColor,font/bold,font/italic,font/color,font/name,font/size," +
+						"horizontalAlignment,verticalAlignment," +
+						"borders/top/color,borders/top/weight,borders/top/dashStyle," +
+						"borders/bottom/color,borders/bottom/weight,borders/bottom/dashStyle," +
+						"borders/left/color,borders/left/weight,borders/left/dashStyle," +
+						"borders/right/color,borders/right/weight,borders/right/dashStyle",
+				);
+				cellRefs.push(cell);
+			}
+		}
+		await ctx.sync();
+
+		// TableCell.font.* returns the "mixed" sentinel (empty/false/unresolved)
+		// even for a cell whose single text run has one explicit format — the same
+		// platform quirk fixed for shape text ranges via getSubstring sampling
+		// (see the whole-range vs. per-paragraph fallback in getShapeParagraphsData).
+		// TableCell.textRuns carries a real, run-local font with no such caveat.
+		// bold/italic/color have no clean "unresolved" sentinel of their own
+		// (false/"" are also valid real values), so re-request textRuns for every
+		// non-empty cell unconditionally rather than only cells that look unresolved.
+		const needsRunFallback: { idx: number; cell: any }[] = [];
+		cellRefs.forEach((cell, i) => {
+			if (safeStr(cell.text)) needsRunFallback.push({ idx: i, cell });
+		});
+		const runFallbacks = new Map<number, { name?: string; size?: number; bold?: boolean; italic?: boolean; color?: string }>();
+		if (needsRunFallback.length > 0) {
+			needsRunFallback.forEach(({ cell }) => ctx.load(cell, "textRuns"));
+			await ctx.sync();
+			needsRunFallback.forEach(({ idx, cell }) => {
+				const run = cell.textRuns?.[0];
+				if (run?.font) {
+					runFallbacks.set(idx, {
+						name: run.font.name,
+						size: run.font.size,
+						bold: run.font.bold,
+						italic: run.font.italic,
+						color: run.font.color,
+					});
+				}
+			});
+		}
+
+		const cells: string[][] = [];
+		const cellFormats: (CellFormat | null)[][] = [];
+		let idx = 0;
+		let anySkippedFill = false;
+		for (let r = 0; r < rows; r++) {
+			const rowText: string[] = [];
+			const rowFmt: (CellFormat | null)[] = [];
+			for (let c = 0; c < cols; c++) {
+				const cellIdx = idx++;
+				const cell = cellRefs[cellIdx];
+				const fallback = runFallbacks.get(cellIdx);
+				rowText.push(safeStr(cell.text));
+				const fmt: CellFormat = {};
+				const cellFillType = safeStr(cell.fill?.type);
+				if (cellFillType === "Solid") {
+					fmt.fillColor = safeStr(cell.fill.foregroundColor);
+				} else if (cellFillType && cellFillType !== "NoFill") {
+					anySkippedFill = true;
+				}
+				if (cell.font?.bold || fallback?.bold) fmt.bold = true;
+				if (cell.font?.italic || fallback?.italic) fmt.italic = true;
+				const cellColor = safeStr(cell.font?.color) || safeStr(fallback?.color);
+				if (cellColor) fmt.color = cellColor;
+				const fontSize = safeNum(cell.font?.size) || safeNum(fallback?.size);
+				if (fontSize > 0) fmt.fontSize = fontSize;
+				const fontName = safeStr(cell.font?.name) || safeStr(fallback?.name);
+				if (fontName) fmt.fontName = fontName;
+				if (cell.horizontalAlignment) {
+					fmt.horizontalAlignment = normalizeEnumString(safeStr(cell.horizontalAlignment), PARAGRAPH_ALIGNMENT_NAMES);
+				}
+				if (cell.verticalAlignment) {
+					fmt.verticalAlignment = normalizeEnumString(safeStr(cell.verticalAlignment), TEXT_VERTICAL_ALIGNMENT_NAMES);
+				}
+				const borders: { top?: CellBorder; bottom?: CellBorder; left?: CellBorder; right?: CellBorder } = {};
+				(["top", "bottom", "left", "right"] as const).forEach((side) => {
+					const b = cell.borders?.[side];
+					if (!b) return;
+					const border: CellBorder = {};
+					if (b.color) border.color = safeStr(b.color);
+					const weight = safeNum(b.weight);
+					if (weight > 0) border.weight = weight;
+					if (b.dashStyle) border.dashStyle = safeStr(b.dashStyle);
+					if (Object.keys(border).length > 0) borders[side] = border;
+				});
+				if (Object.keys(borders).length > 0) fmt.borders = borders;
+				rowFmt.push(Object.keys(fmt).length > 0 ? fmt : null);
+			}
+			cells.push(rowText);
+			cellFormats.push(rowFmt);
+		}
+
+		const styleSettingsSnapshot: TableStyleSettingsSnapshot = {
+			style: normalizeEnumString(safeStr(styleSettings.style), TABLE_STYLE_NAMES) || undefined,
+			areRowsBanded: !!styleSettings.areRowsBanded,
+			areColumnsBanded: !!styleSettings.areColumnsBanded,
+			isFirstRowHighlighted: !!styleSettings.isFirstRowHighlighted,
+			isLastRowHighlighted: !!styleSettings.isLastRowHighlighted,
+			isFirstColumnHighlighted: !!styleSettings.isFirstColumnHighlighted,
+			isLastColumnHighlighted: !!styleSettings.isLastColumnHighlighted,
+		};
+
+		snapshot.table = { rowCount: rows, columnCount: cols, cells, cellFormats, anySkippedFill, rowHeights, styleSettings: styleSettingsSnapshot };
+		return snapshot;
+	}
+
+	if (type === "Group") {
+		const children = shape.group.shapes;
+		children.load("items/$none");
+		await ctx.sync();
+		const childShapes = children.items;
+		const childSnapshots: ShapeSnapshot[] = [];
+		for (const child of childShapes) {
+			childSnapshots.push(await snapshotShape(child, ctx));
+		}
+		// Store each child's position relative to the group's own bounding box,
+		// so buildShapeFromSnapshot can re-anchor them inside a differently
+		// positioned/sized group on the destination slide.
+		snapshot.children = childSnapshots.map((c) => ({
+			...c,
+			left: c.left - base.left,
+			top: c.top - base.top,
+		}));
+		return snapshot;
+	}
+
+	// Line: geometry/rotation/line already captured in `base`/`snapshot.line`.
+	return snapshot;
+}
+
+// Internal-only: captures a shape (recursively for groups) into a portable
+// snapshot for powerpoint_copy_shape. Not part of the public tool list —
+// invoked by the server before dispatching the create step, possibly to a
+// different instance.
+async function handleGetShapeSnapshotInternal(args: unknown): Promise<unknown> {
+	const config = args as { slideIndex?: number; shapeId?: string };
+	const { slideIndex = 1, shapeId = "" } = config;
+
+	return runInPowerPoint(async (ctx) => {
+		const resolved = await resolveShape(ctx, slideIndex, shapeId);
+		if ("error" in resolved) return resolved;
+		const { shape } = resolved;
+
+		const pres = ctx.presentation;
+		pres.pageSetup.load("slideWidth,slideHeight");
+		await ctx.sync();
+		const sourceSlideWidth = safeNum(pres.pageSetup.slideWidth);
+		const sourceSlideHeight = safeNum(pres.pageSetup.slideHeight);
+
+		const shapeSnapshot = await snapshotShape(shape, ctx);
+
+		return { snapshot: { sourceSlideWidth, sourceSlideHeight, shape: shapeSnapshot } };
+	});
+}
+
+// ── powerpoint_copy_shape: snapshot build ───────────────────────
+
+type FidelityResult = {
+	shape: any;
+	preservedFidelity: "full" | "partial" | "bitmap";
+	note: string | null;
+	children?: { shapeId: string; preservedFidelity: "full" | "partial" | "bitmap"; note: string | null }[] | null;
+};
+
+/**
+ * Creates one shape on `slide` from a snapshot at the given resolved
+ * left/top/width/height, recursing into children for Group. Mirrors
+ * snapshotShape's dispatch. Does not sync — callers batch/sync as needed,
+ * except where a just-created shape's own id/properties must be read back
+ * (addTable cell writes, group children) before further calls.
+ */
+async function buildShapeFromSnapshot(
+	slide: PowerPoint.Slide,
+	snap: ShapeSnapshot,
+	left: number,
+	top: number,
+	width: number,
+	height: number,
+	ctx: PowerPoint.RequestContext,
+): Promise<FidelityResult> {
+	if (snap.bitmap) {
+		// No PowerPoint shape-creation primitive exists for pictures (no addPicture/addImage
+		// on ShapeCollection) — paint the bitmap as a picture fill on a borderless rectangle.
+		// The bitmap itself was captured at the source shape's own width/height (see
+		// snapshotShape), so it carries the source's aspect ratio; letterbox-fit the
+		// destination box to that ratio instead of stretching PowerPoint.fill.setImage's
+		// implicit stretch-to-fill onto a mismatched box, which would squeeze the image.
+		const srcAspect = snap.height > 0 ? snap.width / snap.height : 1;
+		const dstAspect = height > 0 ? width / height : 1;
+		let fitWidth = width;
+		let fitHeight = height;
+		if (srcAspect > dstAspect) {
+			fitHeight = width / srcAspect;
+		} else {
+			fitWidth = height * srcAspect;
+		}
+		const fitLeft = left + (width - fitWidth) / 2;
+		const fitTop = top + (height - fitHeight) / 2;
+
+		const picture: any = slide.shapes.addGeometricShape("Rectangle", { left: fitLeft, top: fitTop, width: fitWidth, height: fitHeight });
+		picture.fill.setImage(snap.bitmap);
+		picture.lineFormat.visible = false;
+		picture.rotation = snap.rotation;
+		picture.load("id,name");
+		await ctx.sync();
+		const note = snap.type === "GeometricShape"
+			? "GeometricShape copied as a flattened image — Office.js exposes no way to read back which primitive shape this is"
+			: `${snap.type} copied as a flattened image (not editable)`;
+		return { shape: picture, preservedFidelity: "bitmap", note };
+	}
+
+	if (snap.type === "TextBox" || snap.type === "Placeholder") {
+		// Office.js has no addPlaceholder primitive, so a Placeholder (title,
+		// subtitle, body, etc.) is reconstructed as a plain TextBox standing
+		// in for it — same content/formatting, but no longer a placeholder
+		// tied to the layout.
+		const textbox: any = slide.shapes.addTextBox("", { left, top, width, height });
+		textbox.rotation = snap.rotation;
+		await applyShapeFillAndLine(textbox, snap, ctx);
+		if (snap.textFrame) {
+			const tf: any = textbox.getTextFrameOrNullObject();
+			tf.autoSizeSetting = snap.textFrame.autoSizeSetting;
+			tf.wordWrap = snap.textFrame.wordWrap;
+			tf.verticalAlignment = snap.textFrame.verticalAlignment;
+			tf.topMargin = snap.textFrame.topMargin;
+			tf.bottomMargin = snap.textFrame.bottomMargin;
+			tf.leftMargin = snap.textFrame.leftMargin;
+			tf.rightMargin = snap.textFrame.rightMargin;
+		}
+		textbox.load("id,name");
+		await ctx.sync();
+
+		if (snap.textMarkdown) {
+			await applyTextMarkdownToShape(textbox, snap.textMarkdown, ctx, snap.defaultTextProps, snap.paragraphTextProps);
+		}
+
+		const note = snap.type === "Placeholder"
+			? "Placeholder copied as a plain textbox (Office.js has no placeholder-creation API) — content and formatting preserved, but it no longer tracks the slide layout"
+			: null;
+		return { shape: textbox, preservedFidelity: note ? "partial" : "full", note };
+	}
+
+	if (snap.type === "Line") {
+		const PowerPoint: any = (window as any).PowerPoint;
+		const connectorType = PowerPoint.ConnectorType?.straight ?? "Straight";
+		const line: any = slide.shapes.addLine(connectorType, { left, top, width, height });
+		line.rotation = snap.rotation;
+		await applyShapeFillAndLine(line, snap, ctx);
+		line.load("id,name");
+		await ctx.sync();
+		// A diagonal connector's bounding box alone can't tell "top-left to
+		// bottom-right" apart from "top-right to bottom-left" — Office.js's
+		// PowerPoint.Shape has no flip property and PowerPoint.ShapeAddOptions
+		// takes only left/top/width/height (unlike Excel.Shapes.addLine, which
+		// takes explicit start/end coordinates), and rotation reads 0 for both
+		// directions. So a diagonal line may come out mirrored along one axis;
+		// horizontal/vertical connectors (width or height 0) aren't affected.
+		const isDiagonal = snap.width !== 0 && snap.height !== 0;
+		const note = isDiagonal
+			? "Diagonal connector copied — Office.js exposes no way to read back which of the two diagonal directions the line was drawn in, so it may come out mirrored"
+			: null;
+		return { shape: line, preservedFidelity: note ? "partial" : "full", note };
+	}
+
+	if (snap.type === "Table" && snap.table) {
+		const { rowCount, columnCount, cells, cellFormats, anySkippedFill, rowHeights, styleSettings } = snap.table;
+		const sourceTableHeight = rowHeights.reduce((sum, h) => sum + h, 0);
+		const scale = sourceTableHeight > 0 ? height / sourceTableHeight : 1;
+		const rowProps = rowHeights.map((h) => ({ rowHeight: h * scale }));
+		const table: any = slide.shapes.addTable(rowCount, columnCount, { left, top, width, height, rows: rowProps });
+		table.rotation = snap.rotation;
+		table.load("id,name");
+		const tableRef = table.getTable();
+		await ctx.sync();
+
+		if (styleSettings) {
+			// Banded/highlighted-row shading (e.g. the row right below the header,
+			// or the last row's exception on its first column) is driven by the
+			// table's built-in style settings, not by explicit per-cell fills —
+			// apply it before the per-cell overrides below so any explicit cell
+			// fill captured above still wins for cells that had one. Isolated in
+			// its own best-effort sync since `style` is an enum-typed setter that
+			// has proven finicky on some hosts (see applyShapeFillAndLine).
+			//
+			// Known platform limitation: `style` only round-trips through Office.js's
+			// fixed enum of built-in style names (TABLE_STYLE_NAMES) — it cannot carry
+			// a custom table style's actual style-catalog GUID, which is what PowerPoint
+			// often creates behind the scenes the moment a user tweaks a built-in style's
+			// look (e.g. recoloring the first-column text) in Table Design. Re-applying
+			// the reported name then reproduces the *stock* built-in style, not the
+			// customized one, even though every property this API exposes (name, and
+			// all six highlight/banding flags) matches source and destination exactly.
+			// Confirmed live: a table whose first-column body text renders white in
+			// PowerPoint's own Format > Font dialog still reads `font.color: "#000000"`
+			// via the object model on both the source and the copy — there is no
+			// explicit run-level override to capture, because the white is resolved at
+			// render time from the style catalog entry, which Office.js has no API to
+			// read or write directly.
+			try {
+				const dstStyleSettings: any = tableRef.styleSettings;
+				if (styleSettings.style) dstStyleSettings.style = styleSettings.style;
+				dstStyleSettings.areRowsBanded = !!styleSettings.areRowsBanded;
+				dstStyleSettings.areColumnsBanded = !!styleSettings.areColumnsBanded;
+				dstStyleSettings.isFirstRowHighlighted = !!styleSettings.isFirstRowHighlighted;
+				dstStyleSettings.isLastRowHighlighted = !!styleSettings.isLastRowHighlighted;
+				dstStyleSettings.isFirstColumnHighlighted = !!styleSettings.isFirstColumnHighlighted;
+				dstStyleSettings.isLastColumnHighlighted = !!styleSettings.isLastColumnHighlighted;
+				await ctx.sync();
+			} catch {
+				// best-effort — built-in table style/banding not critical to fidelity
+			}
+		}
+
+		const liveCells: any[][] = [];
+		for (let r = 0; r < rowCount; r++) {
+			const rowCells: any[] = [];
+			for (let c = 0; c < columnCount; c++) {
+				const cell = tableRef.getCellOrNullObject(r, c);
+				// Known platform limitation: PowerPoint.TableCell exposes only a flat
+				// `text` string (multi-line content joined by \r) and a cell-wide
+				// `font`/`textRuns` — there is no per-line paragraph, indentLevel, or
+				// bullet-type property on the class, unlike TextFrame.textRange for
+				// regular shapes. A source cell rendered as a bulleted list therefore
+				// always copies as plain \r-joined lines with no way to reattach
+				// bullet markers via this API.
+				cell.text = cells[r][c];
+				const fmt = cellFormats[r][c];
+				if (fmt) {
+					if (fmt.fillColor) cell.fill.setSolidColor(fmt.fillColor);
+					if (fmt.bold) cell.font.bold = true;
+					if (fmt.italic) cell.font.italic = true;
+					if (fmt.color) cell.font.color = fmt.color;
+					if (fmt.fontSize) cell.font.size = fmt.fontSize;
+					if (fmt.fontName) cell.font.name = fmt.fontName;
+				}
+				rowCells.push(cell);
+			}
+			liveCells.push(rowCells);
+		}
+		await ctx.sync();
+
+		// horizontalAlignment/verticalAlignment/border dashStyle are enum-typed
+		// setters that have proven finicky on some hosts (see applyShapeFillAndLine);
+		// applied best-effort in their own sync so a host-side rejection doesn't
+		// take down the text/fill/font fidelity applied above.
+		try {
+			for (let r = 0; r < rowCount; r++) {
+				for (let c = 0; c < columnCount; c++) {
+					const fmt = cellFormats[r][c];
+					if (!fmt) continue;
+					const cell = liveCells[r][c];
+					if (fmt.horizontalAlignment) cell.horizontalAlignment = fmt.horizontalAlignment;
+					if (fmt.verticalAlignment) cell.verticalAlignment = fmt.verticalAlignment;
+					if (fmt.borders) {
+						(["top", "bottom", "left", "right"] as const).forEach((side) => {
+							const border = fmt.borders?.[side];
+							if (!border) return;
+							const target = cell.borders[side];
+							if (border.color) target.color = border.color;
+							if (border.weight) target.weight = border.weight;
+							if (border.dashStyle) target.dashStyle = border.dashStyle;
+						});
+					}
+				}
+			}
+			await ctx.sync();
+		} catch {
+			// best-effort — cell alignment/border styling not critical to fidelity
+		}
+
+		return {
+			shape: table,
+			preservedFidelity: anySkippedFill ? "partial" : "full",
+			note: anySkippedFill ? "One or more table cells had a non-solid fill (gradient/pattern) that could not be copied; those cells kept the default fill" : null,
+		};
+	}
+
+	if (snap.type === "Group" && snap.children) {
+		const childResults: FidelityResult[] = [];
+		for (const child of snap.children) {
+			// Children carry offsets relative to the group's original bounding
+			// box; re-anchor them inside the (possibly resized) destination
+			// bounding box before building.
+			const childLeft = left + child.left;
+			const childTop = top + child.top;
+			const result = await buildShapeFromSnapshot(slide, child, childLeft, childTop, child.width, child.height, ctx);
+			childResults.push(result);
+		}
+		const childShapeObjs = childResults.map((r) => r.shape);
+		const group: any = slide.shapes.addGroup(childShapeObjs);
+		group.rotation = snap.rotation;
+		group.load("id,name");
+		for (const r of childResults) r.shape.load("id");
+		await ctx.sync();
+
+		const anyBitmap = childResults.some((r) => r.preservedFidelity !== "full");
+		return {
+			shape: group,
+			preservedFidelity: anyBitmap ? "partial" : "full",
+			note: null,
+			children: childResults.map((r) => ({
+				shapeId: safeStr(r.shape.id),
+				preservedFidelity: r.preservedFidelity,
+				note: r.note,
+			})),
+		};
+	}
+
+	// Should be unreachable — every dispatched type above either has a
+	// bitmap or is one of TextBox/Line/Table/Group — but fall back safely.
+	const fallback: any = slide.shapes.addTextBox("", { left, top, width, height });
+	fallback.load("id,name");
+	await ctx.sync();
+	return { shape: fallback, preservedFidelity: "partial", note: "Unrecognized shape snapshot; created empty placeholder" };
+}
+
+async function applyShapeFillAndLine(shape: any, snap: ShapeSnapshot, ctx: PowerPoint.RequestContext): Promise<void> {
+	if (snap.fill) {
+		shape.fill.setSolidColor(snap.fill.color);
+		shape.fill.transparency = snap.fill.transparency;
+	}
+	if (snap.line) {
+		if (snap.line.visible !== null) shape.lineFormat.visible = snap.line.visible;
+		if (snap.line.color) shape.lineFormat.color = snap.line.color;
+		await ctx.sync();
+		// weight/style/dashStyle are finicky on some hosts even once visible=true
+		// has been committed; treat them as best-effort so a host-side rejection
+		// doesn't take down fill/text fidelity, which matter far more.
+		if (snap.line.visible === true) {
+			try {
+				if (snap.line.weight !== null) shape.lineFormat.weight = snap.line.weight;
+				if (snap.line.style) shape.lineFormat.style = snap.line.style;
+				if (snap.line.dashStyle) shape.lineFormat.dashStyle = snap.line.dashStyle;
+				await ctx.sync();
+			} catch {
+				// best-effort — border weight/style/dashStyle not critical to fidelity
+			}
+		}
+	}
+}
+
+/**
+ * Reapplies a textMarkdown snapshot to a freshly-created (empty) textbox —
+ * the build-side mirror of handleSetShapeTextMarkdown, operating on an
+ * already-resolved live shape rather than re-resolving by shapeId.
+ */
+async function applyTextMarkdownToShape(
+	shape: any,
+	markdown: string,
+	ctx: PowerPoint.RequestContext,
+	defaultTextProps?: SideChannelTextProps,
+	paragraphTextProps?: (SideChannelTextProps | undefined)[],
+): Promise<void> {
+	const specs = markdownToParagraphSpecs(markdown);
+	if ("error" in specs) return;
+
+	const tf = shape.getTextFrameOrNullObject();
+	ctx.load(tf, "isNullObject");
+	await ctx.sync();
+	if (tf.isNullObject) return;
+
+	const fullText = specs.map((s) => s.text).join("\r");
+	tf.textRange.text = fullText;
+	if (defaultTextProps) {
+		await applyRangeProperties(defaultTextProps, tf.textRange, ctx);
+	}
+	await ctx.sync();
+
+	const spans = splitParagraphs(fullText);
+	for (let i = 0; i < specs.length; i++) {
+		const spec = specs[i];
+		const span = spans[i];
+		const range = tf.textRange.getSubstring(span.start, span.length);
+		ctx.load(range, TEXT_RANGE_PROP_PATH);
+		await ctx.sync();
+
+		await applyRangeProperties(
+			{
+				indentLevel: spec.indentLevel,
+				bulletType: spec.bulletType,
+				bulletStyle: spec.bulletStyle,
+				...paragraphTextProps?.[i],
+			},
+			range,
+			ctx,
+		);
+		await ctx.sync();
+
+		for (const run of spec.runs ?? []) {
+			const wordRange = tf.textRange.getSubstring(span.start + run.start, run.length);
+			ctx.load(wordRange, TEXT_RANGE_PROP_PATH);
+			await ctx.sync();
+
+			await applyRangeProperties(
+				{ bold: run.bold || undefined, italic: run.italic || undefined, strikethrough: run.strikethrough || undefined, color: run.color },
+				wordRange,
+				ctx,
+			);
+			await ctx.sync();
+		}
+	}
+}
+
+// Internal-only: reconstructs a shape from a snapshot captured by
+// handleGetShapeSnapshotInternal, applying the coordinate defaulting/
+// centering algorithm. Not part of the public tool list — invoked by the
+// server as the second half of powerpoint_copy_shape.
+async function handleCreateShapeFromSnapshotInternal(args: unknown): Promise<unknown> {
+	const config = args as {
+		slideIndex?: number;
+		snapshot?: { sourceSlideWidth: number; sourceSlideHeight: number; shape: ShapeSnapshot };
+		dstLeft?: number;
+		dstTop?: number;
+		dstWidth?: number;
+		dstHeight?: number;
+	};
+	const { slideIndex = 1, snapshot, dstLeft, dstTop, dstWidth, dstHeight } = config;
+
+	if (!snapshot || !snapshot.shape) {
+		return { error: "Missing snapshot data" };
+	}
+
+	return runInPowerPoint(async (ctx) => {
+		const resolved = await resolveSlide(ctx, slideIndex);
+		if ("error" in resolved) return resolved;
+		const { slide } = resolved;
+
+		const pres = ctx.presentation;
+		pres.pageSetup.load("slideWidth,slideHeight");
+		await ctx.sync();
+		const dstSlideWidth = safeNum(pres.pageSetup.slideWidth);
+		const dstSlideHeight = safeNum(pres.pageSetup.slideHeight);
+
+		const src = snapshot.shape;
+		const width = dstWidth ?? src.width;
+		const height = dstHeight ?? src.height;
+
+		const dimsMatch =
+			Math.abs(snapshot.sourceSlideWidth - dstSlideWidth) < 0.5 &&
+			Math.abs(snapshot.sourceSlideHeight - dstSlideHeight) < 0.5;
+
+		const left = dstLeft ?? (dimsMatch ? src.left : (dstSlideWidth - width) / 2);
+		const top = dstTop ?? (dimsMatch ? src.top : (dstSlideHeight - height) / 2);
+
+		const result = await buildShapeFromSnapshot(slide, src, left, top, width, height, ctx);
+		result.shape.load("id");
+		await ctx.sync();
+
+		const children = result.children ?? null;
+
+		return {
+			shapeId: safeStr(result.shape.id),
+			slideIndex,
+			left,
+			top,
+			width,
+			height,
+			preservedFidelity: result.preservedFidelity,
+			note: result.note,
+			children,
+			undoable: true,
+		};
 	});
 }

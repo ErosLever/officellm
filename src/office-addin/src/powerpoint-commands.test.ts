@@ -105,7 +105,7 @@ function makeTestDeck(): MockPresentationData {
 						width: 600,
 						height: 300,
 						font: { name: "Calibri", size: 24, color: "#000000" },
-						paragraphFormat: { horizontalAlignment: "Left", indentLevel: 0 },
+						paragraphFormat: { horizontalAlignment: "Left", indentLevel: 0, bulletType: "Unnumbered" },
 						paragraphs: [
 							undefined,
 							{ paragraphFormat: { indentLevel: 2 } },
@@ -932,7 +932,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 								undefined,
 								undefined,
 								{ paragraphFormat: { indentLevel: 1, bulletType: "Numbered" } },
-								{ paragraphFormat: { bulletType: "None" } },
+								{ paragraphFormat: { bulletType: "Unnumbered" } },
 								undefined,
 							] as any,
 						},
@@ -1115,7 +1115,7 @@ describe("powerpoint_get_shape_text_markdown", () => {
 			{ slideIndex: 1, shapeId: "sInline" },
 		)) as any;
 
-		expect(result.markdown).toBe("- say *hello* _world_ now");
+		expect(result.markdown).toBe("say *hello* _world_ now");
 	});
 });
 
@@ -1232,9 +1232,9 @@ describe("powerpoint_get_slide_text_markdown", () => {
 		const blocks = result.markdown.split("\n\n");
 		expect(blocks).toEqual([
 			"# *Quarterly Results*",
-			"- Revenue grew 15%",
+			"Revenue grew 15%",
 			["- Alpha", "    - Beta", "- Gamma", "- Delta", "- Epsilon"].join("\n"),
-			"[^1] - 1",
+			"[^1] 1",
 		]);
 	});
 
@@ -1256,7 +1256,7 @@ describe("powerpoint_get_slide_text_markdown", () => {
 			{ slideIndex: 1, bulletChar: "*" },
 		)) as any;
 
-		expect(result.markdown).toContain("* Revenue grew 15%");
+		expect(result.markdown).toContain("* Alpha");
 	});
 
 	it("rejects a bulletChar other than '-' or '*'", async () => {
