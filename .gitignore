@@ -1,10 +1,10 @@
 node_modules/
-.pi/
+.pi/*
+!.pi/skills/
 src/office-addin/dist/
 bin/
 obj/
 .specify/
-.pi/
 node_modules/
 dist/
 .pi-lens/
