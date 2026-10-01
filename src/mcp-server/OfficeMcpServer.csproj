@@ -30,12 +30,12 @@
   -->
   <ItemGroup>
     <PackageReference Include="ShapeCrawler" Version="0.80.0" />
-    <PackageReference Include="Magick.NET-Q16-AnyCPU" Version="14.16.0" ExcludeAssets="all" />
-    <PackageReference Include="Magick.NET.Core" Version="14.16.0" ExcludeAssets="all" />
-    <PackageReference Include="SkiaSharp" Version="4.151.1" ExcludeAssets="all" />
-    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.151.1" ExcludeAssets="all" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.151.1" ExcludeAssets="all" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.151.1" ExcludeAssets="all" />
+    <PackageReference Include="Magick.NET-Q16-AnyCPU" Version="14.17.2" ExcludeAssets="all" />
+    <PackageReference Include="Magick.NET.Core" Version="14.17.2" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp" Version="4.153.1" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.153.1" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.153.1" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.153.1" ExcludeAssets="all" />
   </ItemGroup>
 
   <!--
