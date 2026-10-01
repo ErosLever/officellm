@@ -1,6 +1,6 @@
 # Tool Reference
 
-All 138 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
+All 141 MCP tools exposed by this project, grouped by host application and category. Every tool (except `office_get_active_apps` and a handful of server-side cross-cutting tools) requires an `instanceId` obtained from `office_get_active_apps`.
 
 ## Shared / Cross-cutting
 
@@ -25,6 +25,7 @@ All slide-index parameters (`slideIndex`, `atIndex`, `fromIndex`/`toIndex`, `tar
 | `powerpoint_get_slide_image` | Renders a slide as a PNG (base64) |
 | `powerpoint_get_shape_image` | Renders a single shape as a PNG (base64) |
 | `powerpoint_get_table` | Reads all cell text from a table shape |
+| `powerpoint_get_table_cell` | Reads one table cell's text and formatting: fill color, font (bold/italic/color/name/size), horizontal/vertical alignment, and per-side borders. Use this to verify cell-level formatting fidelity that `powerpoint_get_table` (text only) can't show |
 | `powerpoint_get_shape_paragraphs` | Returns a shape's text split into paragraphs, each with a start/length span and a groupId pointing into a deduplicated set of font/paragraph/bullet property diffs against the shape's default properties |
 | `powerpoint_get_shape_text_markdown` | Renders a shape's paragraphs as an indented markdown-like list — real bullet markers (`1.`, `a)`, `(iv)`, etc.) for the 16 Latin-representable bullet styles, falling back to `1.`/`2.` for the rest, `bulletChar` (`-`/`*`) for unnumbered paragraphs, indented per paragraph's indentLevel. Inline character formatting is encoded Slack-style: `*bold*`, `_italic_`, `~strike~`, nestable (`*_~combo~_*`), with literal `*`/`_`/`~` backslash-escaped |
 | `powerpoint_get_slide_text_markdown` | Combines every text-bearing shape on a slide into one markdown document, ordered top-to-bottom then left-to-right (rows grouped within 5% of slide height tolerance). A paragraph with effective font size >=32pt renders as `# heading`; a shape with effective font size <=12pt whose bottom edge falls in the last 15% of slide height renders inline as a `[^1] `-prefixed line (no separate footnote block); everything else uses the same bullet/inline-formatting rules as `powerpoint_get_shape_text_markdown` |
@@ -49,6 +50,8 @@ All slide-index parameters (`slideIndex`, `atIndex`, `fromIndex`/`toIndex`, `tar
 | `powerpoint_add_image` | Inserts an image from base64 data |
 | `powerpoint_add_table` | Creates a new table shape |
 | `powerpoint_delete_shape` | Deletes a shape (irreversible) |
+| `powerpoint_copy_shape` | Copies a shape between slides via Office.js reconstruction (fill/line/text, tables with per-cell formatting); falls back to a flattened bitmap copy for shape types/fills Office.js can't read back. Returns `preservedFidelity`: `full`, `partial`, or `bitmap` |
+| `powerpoint_copy_shape_ooxml` | Copies one or more shapes between slides at the raw OOXML level via ShapeCrawler, preserving attributes Office.js can't read back (connector flipH/flipV, arrowhead styling, gradients, theme-relative fills). Destroys and recreates the destination slide rather than editing it in place — existing shape IDs on that slide are not preserved |
 
 ### Slide Management
 | Tool | Description |
