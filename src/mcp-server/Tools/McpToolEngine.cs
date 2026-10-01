@@ -2,6 +2,11 @@ using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using OfficeMcpServer.Models;
 using OfficeMcpServer.Hubs;
+using ShapeCrawler;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using A = DocumentFormat.OpenXml.Drawing;
+using P = DocumentFormat.OpenXml.Presentation;
 
 namespace OfficeMcpServer.Tools;
 
@@ -671,6 +676,26 @@ public static class McpToolEngine
                     ["dstHeight"] = new { type = "number", description = "Destination height in points. Default: source shape's height." }
                 },
                 required = new[] { "srcInstanceId", "srcSlideIndex", "srcShapeId", "dstSlideIndex" }
+            }
+        },
+        new
+        {
+            name = "powerpoint_copy_shape_ooxml",
+            description = "Copies one or more shapes between slides at the OOXML level via ShapeCrawler, preserving attributes Office.js cannot read back (connector flipH/flipV, arrowhead styling, gradients, theme-relative fills). WARNING: unlike powerpoint_copy_shape, this does not edit the destination slide in place — it exports the destination slide, rebuilds it with the copied shape(s) appended, then destroys and replaces the original slide. Existing shape IDs on the destination slide are not preserved across this replacement. Copied shapes keep their original position/size from the source slide. Same-document or cross-document.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new Dictionary<string, object>
+                {
+                    ["srcInstanceId"] = new { type = "string", description = "REQUIRED. Instance ID of the source presentation." },
+                    ["srcSlideIndex"] = new { type = "integer", description = "REQUIRED. 1-based index of the slide containing the shape(s) to copy." },
+                    ["srcShapeIds"] = new { type = "array", items = new { type = "string" }, description = "REQUIRED. One or more shape IDs or names to copy, in the order they should be appended to the destination slide. The FIRST entry is the reference shape — see dstX/dstY." },
+                    ["dstInstanceId"] = new { type = "string", description = "Instance ID of the destination presentation. Default: same as srcInstanceId." },
+                    ["dstSlideIndex"] = new { type = "integer", description = "REQUIRED. 1-based index of the destination slide. This slide will be destroyed and recreated." },
+                    ["dstX"] = new { type = "number", description = "Target X position (points) for the reference shape (first entry in srcShapeIds) on the destination slide. If given together with dstY, every copied shape is shifted by the same offset, preserving their relative layout. Omit to keep each shape's original absolute position." },
+                    ["dstY"] = new { type = "number", description = "Target Y position (points) for the reference shape. See dstX." }
+                },
+                required = new[] { "srcInstanceId", "srcSlideIndex", "srcShapeIds", "dstSlideIndex" }
             }
         },
 
@@ -1405,6 +1430,22 @@ public static class McpToolEngine
             return await HandleCopyShape(srcInstanceId, dstInstanceId, args.Value);
         }
 
+        if (name == "powerpoint_copy_shape_ooxml" && args.HasValue)
+        {
+            var unknownParamError = ValidateKnownParameters(args.Value, name,
+                "srcInstanceId", "srcSlideIndex", "srcShapeIds",
+                "dstInstanceId", "dstSlideIndex", "dstX", "dstY");
+            if (unknownParamError != null)
+                return unknownParamError;
+
+            string? srcInstanceIdOoxml = args.Value.TryGetProperty("srcInstanceId", out var siidOoxml) ? siidOoxml.GetString() : null;
+            string dstInstanceIdOoxml = args.Value.TryGetProperty("dstInstanceId", out var diidOoxml) && !string.IsNullOrEmpty(diidOoxml.GetString())
+                ? diidOoxml.GetString()!
+                : srcInstanceIdOoxml ?? "";
+
+            return await HandleCopyShapeOoxml(srcInstanceIdOoxml, dstInstanceIdOoxml, args.Value);
+        }
+
         if (name == "powerpoint_set_slide_layout" && args.HasValue)
         {
             var unknownParamError = ValidateKnownParameters(args.Value, name,
@@ -1696,6 +1737,968 @@ public static class McpToolEngine
 
         return BuildToolResult(createResult, "powerpoint_copy_shape", dstInstanceId,
             JsonSerializer.Serialize(args));
+    }
+
+    /// <summary>
+    /// Copies one or more shapes between slides at the OOXML level via ShapeCrawler, preserving
+    /// attributes Office.js's object model can't read back (connector flipH/flipV, arrowhead
+    /// styling, gradients). Unlike HandleCopyShape, this does not edit the destination slide in
+    /// place: it exports both slides, clones the shapes into an in-memory copy of the destination
+    /// slide's package, then deletes and reimports the destination slide with the result.
+    /// </summary>
+    private static async Task<object> HandleCopyShapeOoxml(string? srcInstanceId, string dstInstanceId, JsonElement args)
+    {
+        if (string.IsNullOrEmpty(srcInstanceId))
+        {
+            return new ToolError(
+                "Missing required parameter: srcInstanceId. Call office_get_active_apps first to get the list of available instances.",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "srcInstanceId" }
+            ).ToMcpResponse();
+        }
+
+        if (string.IsNullOrEmpty(dstInstanceId))
+        {
+            return new ToolError(
+                "Missing required parameter: dstInstanceId (or srcInstanceId to default from).",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "dstInstanceId" }
+            ).ToMcpResponse();
+        }
+
+        if (_registry.GetInstance(srcInstanceId) == null)
+        {
+            return new ToolError(
+                $"Instance '{srcInstanceId}' is not registered or has timed out. Call office_get_active_apps to see current instances.",
+                ErrorCodes.INSTANCE_NOT_FOUND,
+                new { instanceId = srcInstanceId }
+            ).ToMcpResponse();
+        }
+
+        if (_registry.GetInstance(dstInstanceId) == null)
+        {
+            return new ToolError(
+                $"Instance '{dstInstanceId}' is not registered or has timed out. Call office_get_active_apps to see current instances.",
+                ErrorCodes.INSTANCE_NOT_FOUND,
+                new { instanceId = dstInstanceId }
+            ).ToMcpResponse();
+        }
+
+        if (!args.TryGetProperty("srcSlideIndex", out var ssiProp))
+        {
+            return new ToolError(
+                "Missing required parameter: srcSlideIndex.",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "srcSlideIndex" }
+            ).ToMcpResponse();
+        }
+        int srcSlideIndex = ssiProp.GetInt32();
+
+        if (!args.TryGetProperty("srcShapeIds", out var sidsProp) || sidsProp.ValueKind != JsonValueKind.Array || sidsProp.GetArrayLength() == 0)
+        {
+            return new ToolError(
+                "Missing required parameter: srcShapeIds (non-empty array of shape IDs or names).",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "srcShapeIds" }
+            ).ToMcpResponse();
+        }
+        var srcShapeIds = sidsProp.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+
+        if (!args.TryGetProperty("dstSlideIndex", out var dsiProp))
+        {
+            return new ToolError(
+                "Missing required parameter: dstSlideIndex.",
+                ErrorCodes.MISSING_PARAMETER,
+                new { parameter = "dstSlideIndex" }
+            ).ToMcpResponse();
+        }
+        int dstSlideIndex = dsiProp.GetInt32();
+
+        decimal? dstX = args.TryGetProperty("dstX", out var dxProp) ? dxProp.GetDecimal() : null;
+        decimal? dstY = args.TryGetProperty("dstY", out var dyProp) ? dyProp.GetDecimal() : null;
+
+        var srcExportArgs = JsonSerializer.SerializeToElement(new { instanceId = srcInstanceId, slideIndex = srcSlideIndex });
+        var srcExportResult = await DispatchRaw(srcInstanceId, "powerpoint_export_slide_internal", srcExportArgs);
+        if (srcExportResult == null || !srcExportResult.Success)
+        {
+            return new ToolError(
+                $"Failed to export slide {srcSlideIndex} from instance '{srcInstanceId}': {srcExportResult?.Error ?? "timed out"}",
+                srcExportResult == null ? ErrorCodes.TIMEOUT : ParseErrorCode(srcExportResult.Error),
+                new { srcInstanceId, srcSlideIndex }
+            ).ToMcpResponse();
+        }
+
+        var srcExportPayload = JsonSerializer.SerializeToElement(srcExportResult.Payload);
+        if (!srcExportPayload.TryGetProperty("base64", out var srcBase64Prop))
+        {
+            var srcExportError = srcExportPayload.TryGetProperty("error", out var e1) ? e1.GetString() : "no base64 returned";
+            return new ToolError(
+                $"Failed to export slide {srcSlideIndex} from instance '{srcInstanceId}': {srcExportError}",
+                ErrorCodes.INVALID_PARAMETER,
+                new { srcInstanceId, srcSlideIndex }
+            ).ToMcpResponse();
+        }
+
+        var dstExportArgs = JsonSerializer.SerializeToElement(new { instanceId = dstInstanceId, slideIndex = dstSlideIndex });
+        var dstExportResult = await DispatchRaw(dstInstanceId, "powerpoint_export_slide_internal", dstExportArgs);
+        if (dstExportResult == null || !dstExportResult.Success)
+        {
+            return new ToolError(
+                $"Failed to export slide {dstSlideIndex} from instance '{dstInstanceId}': {dstExportResult?.Error ?? "timed out"}",
+                dstExportResult == null ? ErrorCodes.TIMEOUT : ParseErrorCode(dstExportResult.Error),
+                new { dstInstanceId, dstSlideIndex }
+            ).ToMcpResponse();
+        }
+
+        var dstExportPayload = JsonSerializer.SerializeToElement(dstExportResult.Payload);
+        if (!dstExportPayload.TryGetProperty("base64", out var dstBase64Prop))
+        {
+            var dstExportError = dstExportPayload.TryGetProperty("error", out var e2) ? e2.GetString() : "no base64 returned";
+            return new ToolError(
+                $"Failed to export slide {dstSlideIndex} from instance '{dstInstanceId}': {dstExportError}",
+                ErrorCodes.INVALID_PARAMETER,
+                new { dstInstanceId, dstSlideIndex }
+            ).ToMcpResponse();
+        }
+
+        string mutatedBase64;
+        List<string> copiedShapeNames;
+        try
+        {
+            using var srcPresRaw = new Presentation(new MemoryStream(Convert.FromBase64String(srcBase64Prop.GetString()!)));
+            using var dstPres = new Presentation(new MemoryStream(Convert.FromBase64String(dstBase64Prop.GetString()!)));
+
+            var srcSlideRaw = srcPresRaw.Slides[0];
+            var resolvedShapes = new List<IShape>();
+            foreach (var srcShapeId in srcShapeIds)
+            {
+                var shape = srcSlideRaw.Shapes.FirstOrDefault(s =>
+                    s.Id.ToString() == srcShapeId || s.Name == srcShapeId);
+                if (shape is null)
+                {
+                    return new ToolError(
+                        $"Shape '{srcShapeId}' not found on slide {srcSlideIndex} of instance '{srcInstanceId}'.",
+                        ErrorCodes.INVALID_PARAMETER,
+                        new { srcInstanceId, srcSlideIndex, srcShapeId }
+                    ).ToMcpResponse();
+                }
+
+                resolvedShapes.Add(shape);
+            }
+
+            // Placeholders without a local <a:xfrm> inherit position/size from their slide's
+            // layout. ShapeCrawler's Position/ShapeSize *setters* fall back to writing into that
+            // shared layout/master element when no local xfrm exists, so cloning such a shape
+            // as-is and then nudging it via IShape.X/Y would corrupt the source layout instead of
+            // moving the copy. Bake in an explicit xfrm via the raw Open XML SDK first (getters
+            // are safe here — only the setters have the fallback), then reopen the hardened bytes
+            // with ShapeCrawler for the actual copy.
+            using var hardenedPres = HardenPlaceholderGeometry(srcPresRaw, resolvedShapes);
+
+            // Placeholders also inherit vertical anchor, paragraph alignment, and all-caps from
+            // their slide layout/master when the shape itself has no local override. ShapeCrawler's
+            // raw-XML clone carries only what's explicitly present on the shape, so those inherited
+            // values are silently dropped on copy. Resolve the effective value for each property by
+            // walking shape -> layout placeholder -> master placeholder -> master txStyles, and bake
+            // it in as an explicit local override before cloning, mirroring HardenPlaceholderGeometry.
+            // Theme-relative refs (+mn-lt/+mj-lt, schemeClr) only need flattening to a literal
+            // value when the destination slide's theme would actually resolve them differently -
+            // if source and destination share the same effective font/color for a given slot,
+            // leaving the symbolic reference intact preserves PowerPoint's "(Body)"/"(Headings)"
+            // theme-linkage (which affects more than just the displayed name - e.g. interline
+            // spacing) instead of needlessly collapsing it to a plain literal.
+            SlideThemeContext? dstThemeCtx = null;
+            try
+            {
+                using var dstThemePres = new Presentation(new MemoryStream(Convert.FromBase64String(dstBase64Prop.GetString()!)));
+                using var dstThemeSdkDoc = dstThemePres.GetSdkPresentationDocument();
+                var dstThemeSlidePart = dstThemeSdkDoc.PresentationPart!.SlideParts.First();
+                dstThemeCtx = ResolveThemeContext(dstThemeSlidePart);
+            }
+            catch
+            {
+                dstThemeCtx = null;
+            }
+
+            using var textHardenedPres = HardenPlaceholderTextFormatting(hardenedPres ?? srcPresRaw, resolvedShapes, dstThemeCtx);
+            var srcShapes = textHardenedPres?.Slides[0].Shapes ?? hardenedPres?.Slides[0].Shapes ?? srcSlideRaw.Shapes;
+
+            var dstShapes = dstPres.Slides[0].Shapes;
+            var addedShapes = new List<IShape>();
+
+            foreach (var srcShapeId in srcShapeIds)
+            {
+                var shape = srcShapes.First(s =>
+                    s.Id.ToString() == srcShapeId || s.Name == srcShapeId);
+                dstShapes.Add(shape);
+                addedShapes.Add(dstShapes.Last());
+            }
+
+            if (dstX.HasValue && dstY.HasValue)
+            {
+                var reference = addedShapes[0];
+                var offsetX = dstX.Value - reference.X;
+                var offsetY = dstY.Value - reference.Y;
+                foreach (var added in addedShapes)
+                {
+                    added.X += offsetX;
+                    added.Y += offsetY;
+                }
+            }
+
+            copiedShapeNames = addedShapes.Select(s => s.Name).ToList();
+            mutatedBase64 = dstPres.AsBase64();
+        }
+        catch (Exception ex)
+        {
+            return new ToolError(
+                $"Failed to copy shape(s) at the OOXML level: {ex.Message}",
+                ErrorCodes.INTERNAL_ERROR,
+                new { srcInstanceId, srcSlideIndex, srcShapeIds, dstInstanceId, dstSlideIndex }
+            ).ToMcpResponse();
+        }
+
+        var deleteArgs = JsonSerializer.SerializeToElement(new { instanceId = dstInstanceId, slideIndex = dstSlideIndex });
+        var deleteResult = await DispatchRaw(dstInstanceId, "powerpoint_delete_slide", deleteArgs);
+        if (deleteResult == null || !deleteResult.Success)
+        {
+            return new ToolError(
+                $"Failed to delete slide {dstSlideIndex} on instance '{dstInstanceId}' before reimport: {deleteResult?.Error ?? "timed out"}",
+                deleteResult == null ? ErrorCodes.TIMEOUT : ParseErrorCode(deleteResult.Error),
+                new { dstInstanceId, dstSlideIndex }
+            ).ToMcpResponse();
+        }
+
+        var importArgs = JsonSerializer.SerializeToElement(new { instanceId = dstInstanceId, base64 = mutatedBase64, targetIndex = dstSlideIndex });
+        var importResult = await DispatchRaw(dstInstanceId, "powerpoint_import_slide_internal", importArgs);
+        if (importResult == null || !importResult.Success)
+        {
+            return new ToolError(
+                $"Failed to reimport mutated slide at index {dstSlideIndex} on instance '{dstInstanceId}': {importResult?.Error ?? "timed out"}",
+                importResult == null ? ErrorCodes.TIMEOUT : ParseErrorCode(importResult.Error),
+                new { dstInstanceId, dstSlideIndex }
+            ).ToMcpResponse();
+        }
+
+        var importPayload = JsonSerializer.SerializeToElement(importResult.Payload);
+        int newSlideIndex = importPayload.TryGetProperty("newSlideIndex", out var nsi) ? nsi.GetInt32() : dstSlideIndex;
+        string? newSlideId = importPayload.TryGetProperty("newSlideId", out var nsId) ? nsId.GetString() : null;
+
+        _auditLog.Log(new AuditEntry
+        {
+            ToolName = "powerpoint_copy_shape_ooxml",
+            InstanceId = dstInstanceId,
+            Inputs = JsonSerializer.Serialize(args),
+            Outcome = "success"
+        });
+
+        return new
+        {
+            content = new[]
+            {
+                new
+                {
+                    type = "text",
+                    text = JsonSerializer.Serialize(new
+                    {
+                        dstSlideIndex = newSlideIndex,
+                        newSlideId,
+                        copiedShapeNames,
+                        undoable = true
+                    }, new JsonSerializerOptions { WriteIndented = true })
+                }
+            },
+            isError = false
+        };
+    }
+
+    /// <summary>
+    /// Bakes an explicit local &lt;a:xfrm&gt; into any of the given shapes that currently lack one
+    /// (placeholders inheriting position/size from their slide layout). Returns a new hardened
+    /// Presentation to copy from, or null if none of the shapes need hardening (caller should keep
+    /// using the original). Edits go through the raw Open XML SDK, bypassing ShapeCrawler's
+    /// Position/ShapeSize setters, which fall back to writing into the shared layout/master element
+    /// when no local xfrm exists — corrupting shared geometry instead of creating a local override.
+    /// </summary>
+    private static Presentation? HardenPlaceholderGeometry(Presentation srcPres, List<IShape> shapes)
+    {
+        var needsHardening = shapes
+            .Where(s => s.SdkOpenXmlElement is P.Shape sdkElement && !sdkElement.Descendants<A.Offset>().Any())
+            .ToList();
+
+        if (needsHardening.Count == 0)
+        {
+            return null;
+        }
+
+        // Resolve inherited geometry via the safe getters before touching the SDK document.
+        var geometryById = needsHardening.ToDictionary(
+            s => s.Id,
+            s => (X: s.X, Y: s.Y, Width: s.Width, Height: s.Height));
+
+        using var sdkDoc = srcPres.GetSdkPresentationDocument();
+        var slidePart = sdkDoc.PresentationPart!.SlideParts.First();
+        var pShapes = slidePart.Slide!.CommonSlideData!.ShapeTree!.Descendants<P.Shape>();
+
+        foreach (var pShape in pShapes)
+        {
+            var id = (int)pShape.Descendants<P.NonVisualDrawingProperties>().First().Id!.Value;
+            if (!geometryById.TryGetValue(id, out var geo))
+            {
+                continue;
+            }
+
+            pShape.ShapeProperties!.Transform2D = new A.Transform2D(
+                new A.Offset { X = (long)(geo.X * 12700m), Y = (long)(geo.Y * 12700m) },
+                new A.Extents { Cx = (long)(geo.Width * 12700m), Cy = (long)(geo.Height * 12700m) });
+        }
+
+        using var outStream = new MemoryStream();
+        sdkDoc.Clone(outStream);
+        return new Presentation(outStream);
+    }
+
+    /// <summary>
+    /// Bakes effective vertical anchor, paragraph alignment, and all-caps into any of the given
+    /// shapes that inherit them from their slide layout/master placeholder rather than defining
+    /// them locally. ShapeCrawler's raw-XML clone only carries what's explicitly present on the
+    /// shape element, so a copied placeholder that relied on inherited formatting silently loses
+    /// it. Resolves each property by walking shape -&gt; layout placeholder -&gt; master placeholder
+    /// -&gt; master titleStyle/bodyStyle/otherStyle, then writes the resolved value as an explicit
+    /// local override via the raw Open XML SDK. Returns a new hardened Presentation, or null if
+    /// none of the shapes needed hardening (caller should keep using the input Presentation).
+    /// </summary>
+    private static Presentation? HardenPlaceholderTextFormatting(Presentation srcPres, List<IShape> shapes, SlideThemeContext? dstThemeCtx)
+    {
+        using var sdkDoc = srcPres.GetSdkPresentationDocument();
+        var slidePart = sdkDoc.PresentationPart!.SlideParts.First();
+        var pShapes = slidePart.Slide!.CommonSlideData!.ShapeTree!.Descendants<P.Shape>().ToList();
+
+        var shapeIds = shapes.Select(s => s.Id).ToHashSet();
+        var candidates = pShapes
+            .Where(ps => shapeIds.Contains((int)ps.Descendants<P.NonVisualDrawingProperties>().First().Id!.Value))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var layoutPart = slidePart.SlideLayoutPart;
+        var masterPart = layoutPart?.SlideMasterPart;
+        var layoutShapes = layoutPart?.SlideLayout?.CommonSlideData?.ShapeTree?.Descendants<P.Shape>().ToList()
+            ?? new List<P.Shape>();
+        var masterShapes = masterPart?.SlideMaster?.CommonSlideData?.ShapeTree?.Descendants<P.Shape>().ToList()
+            ?? new List<P.Shape>();
+        var txStyles = masterPart?.SlideMaster?.TextStyles;
+        var themeCtx = ResolveThemeContext(slidePart);
+
+        bool changed = false;
+
+        // Shape fill: the shape's own <p:spPr><a:solidFill> (as opposed to a text run's fill,
+        // handled below) can also carry a theme-relative schemeClr - e.g. a rectangle's own
+        // background color, not any text inside it. Same cross-theme-resolution risk as the
+        // run/placeholder fills below, so flatten it the same way. Applies to every candidate
+        // shape regardless of whether it has text.
+        foreach (var pShape in candidates)
+        {
+            var shapeSolidFill = pShape.ShapeProperties?.GetFirstChild<A.SolidFill>();
+            if (shapeSolidFill?.GetFirstChild<A.SchemeColor>() != null)
+            {
+                var srcShapeFillHex = ResolveSolidFillHex(shapeSolidFill, themeCtx);
+                var dstShapeFillHex = dstThemeCtx != null ? ResolveSolidFillHex(shapeSolidFill, dstThemeCtx) : null;
+                if (srcShapeFillHex != null && NeedsFlattening(srcShapeFillHex, dstShapeFillHex, dstThemeCtx))
+                {
+                    var schemeClr = shapeSolidFill.GetFirstChild<A.SchemeColor>()!;
+                    shapeSolidFill.RemoveChild(schemeClr);
+                    shapeSolidFill.AppendChild(new A.RgbColorModelHex { Val = srcShapeFillHex });
+                    changed = true;
+                }
+
+                continue;
+            }
+
+            // No direct <a:solidFill> on <p:spPr> - the fill may instead come from the shape's
+            // "quick style" <p:style><a:fillRef idx="N"><a:schemeClr/></a:fillRef>, which resolves
+            // against whichever theme the destination slide uses. idx="0" means "no fill from the
+            // style" - nothing to flatten.
+            var fillRef = pShape.ShapeStyle?.FillReference;
+            var fillRefIdx = fillRef?.Index?.Value;
+            var fillSchemeColor = fillRef?.GetFirstChild<A.SchemeColor>();
+            if (fillRef == null || fillRefIdx is null or 0 || fillSchemeColor?.Val?.Value is not A.SchemeColorValues fillSchemeVal)
+            {
+                continue;
+            }
+
+            var srcFillRefHex = ResolveSchemeColorHex(themeCtx.ColorScheme, themeCtx.MapColor(fillSchemeVal));
+            var dstFillRefHex = dstThemeCtx != null
+                ? ResolveSchemeColorHex(dstThemeCtx.ColorScheme, dstThemeCtx.MapColor(fillSchemeVal))
+                : null;
+            if (srcFillRefHex == null || !NeedsFlattening(srcFillRefHex, dstFillRefHex, dstThemeCtx))
+            {
+                continue;
+            }
+
+            // Materialize the resolved color as an explicit <a:solidFill> on <p:spPr>, which takes
+            // precedence over the style's fillRef - schema order requires it to come after any
+            // xfrm/geometry and before ln/effects, so insert past those rather than just appending.
+            if (pShape.ShapeProperties == null)
+            {
+                pShape.ShapeProperties = new P.ShapeProperties();
+            }
+
+            var spPr = pShape.ShapeProperties;
+            var insertIndex = 0;
+            foreach (var child in spPr.ChildElements)
+            {
+                if (child is A.Transform2D or A.CustomGeometry or A.PresetGeometry)
+                {
+                    insertIndex++;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            spPr.InsertAt(new A.SolidFill(new A.RgbColorModelHex { Val = srcFillRefHex }), insertIndex);
+            changed = true;
+        }
+
+        foreach (var pShape in candidates)
+        {
+            if (pShape.TextBody == null)
+            {
+                continue;
+            }
+
+            var ph = pShape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.GetFirstChild<P.PlaceholderShape>();
+            if (ph == null)
+            {
+                // Non-placeholder shapes (plain autoshapes/textboxes) don't inherit via
+                // layout/master lstStyle - instead they can carry a <p:style> block whose
+                // <a:fontRef idx="major"|"minor"> supplies the theme-relative default font/color
+                // for any run lacking its own local override. Raw-cloning that block verbatim
+                // would resolve against whichever theme the destination slide happens to use, so
+                // flatten it to a literal typeface/color here, scoped to the source slide's theme.
+                var fontRef = pShape.ShapeStyle?.FontReference;
+                var idxVal = fontRef?.Index?.Value;
+                if (fontRef != null && idxVal != A.FontCollectionIndexValues.None)
+                {
+                    var isMajor = idxVal == A.FontCollectionIndexValues.Major;
+                    var srcTypeface = ResolveLatinTypeface(themeCtx.FontScheme, isMajor);
+                    var literalTypeface = NeedsFlattening(srcTypeface, ResolveLatinTypeface(dstThemeCtx?.FontScheme, isMajor), dstThemeCtx)
+                        ? srcTypeface
+                        : null;
+
+                    var schemeColor = fontRef.GetFirstChild<A.SchemeColor>();
+                    string? literalHex = null;
+                    if (schemeColor?.Val?.Value is A.SchemeColorValues schemeVal)
+                    {
+                        var srcHex = ResolveSchemeColorHex(themeCtx.ColorScheme, themeCtx.MapColor(schemeVal));
+                        var dstHex = dstThemeCtx != null
+                            ? ResolveSchemeColorHex(dstThemeCtx.ColorScheme, dstThemeCtx.MapColor(schemeVal))
+                            : null;
+                        literalHex = NeedsFlattening(srcHex, dstHex, dstThemeCtx) ? srcHex : null;
+                    }
+
+                    foreach (var paragraph in pShape.TextBody.Elements<A.Paragraph>())
+                    {
+                        if (literalTypeface != null)
+                        {
+                            changed |= ApplyToRunsIfMissing(
+                                paragraph,
+                                rPr => rPr.GetFirstChild<A.LatinFont>() == null,
+                                rPr => rPr.AppendChild(new A.LatinFont { Typeface = literalTypeface }));
+                        }
+
+                        if (literalHex != null)
+                        {
+                            changed |= ApplyToRunsIfMissing(
+                                paragraph,
+                                rPr => rPr.GetFirstChild<A.SolidFill>() == null,
+                                rPr => rPr.InsertAt(new A.SolidFill(new A.RgbColorModelHex { Val = literalHex }), 0));
+                        }
+                    }
+                }
+
+                continue;
+            }
+
+            var layoutMatch = FindMatchingPlaceholder(layoutShapes, ph);
+            var masterMatch = FindMatchingPlaceholder(masterShapes, ph);
+            var txBody = pShape.TextBody;
+
+            // Vertical anchor: shape bodyPr -> layout placeholder bodyPr -> master placeholder bodyPr.
+            if (txBody.BodyProperties?.Anchor == null)
+            {
+                var resolvedAnchor = layoutMatch?.TextBody?.BodyProperties?.Anchor?.Value
+                    ?? masterMatch?.TextBody?.BodyProperties?.Anchor?.Value;
+                if (resolvedAnchor != null)
+                {
+                    txBody.BodyProperties ??= new A.BodyProperties();
+                    txBody.BodyProperties.Anchor = resolvedAnchor;
+                    changed = true;
+                }
+            }
+
+            // Text-frame insets (margins): same shape bodyPr -> layout placeholder bodyPr ->
+            // master placeholder bodyPr inheritance as anchor above. Without this, a placeholder
+            // that inherits e.g. a zero margin from its layout/master loses that on copy and
+            // falls back to PowerPoint's own default insets (0.25cm/0.13cm) on the destination.
+            changed |= HardenInset(txBody, layoutMatch, masterMatch, bp => bp.LeftInset, (bp, v) => bp.LeftInset = v);
+            changed |= HardenInset(txBody, layoutMatch, masterMatch, bp => bp.TopInset, (bp, v) => bp.TopInset = v);
+            changed |= HardenInset(txBody, layoutMatch, masterMatch, bp => bp.RightInset, (bp, v) => bp.RightInset = v);
+            changed |= HardenInset(txBody, layoutMatch, masterMatch, bp => bp.BottomInset, (bp, v) => bp.BottomInset = v);
+
+            var styleLevel1 = GetStyleLevel1(txStyles, ph.Type?.Value);
+            var ownLstLvl1 = txBody.ListStyle?.GetFirstChild<A.Level1ParagraphProperties>();
+            var layoutLstLvl1 = layoutMatch?.TextBody?.ListStyle?.GetFirstChild<A.Level1ParagraphProperties>();
+            var masterLstLvl1 = masterMatch?.TextBody?.ListStyle?.GetFirstChild<A.Level1ParagraphProperties>();
+
+            foreach (var paragraph in txBody.Elements<A.Paragraph>())
+            {
+                paragraph.ParagraphProperties ??= new A.ParagraphProperties();
+                var pPr = paragraph.ParagraphProperties;
+
+                // Horizontal alignment: own paragraph -> own lstStyle -> layout placeholder
+                // (paragraph then lstStyle) -> master placeholder (paragraph then lstStyle) ->
+                // master titleStyle/bodyStyle/otherStyle.
+                if (pPr.Alignment == null)
+                {
+                    var resolvedAlign = ownLstLvl1?.Alignment?.Value
+                        ?? layoutMatch?.TextBody?.Elements<A.Paragraph>().FirstOrDefault()?.ParagraphProperties?.Alignment?.Value
+                        ?? layoutLstLvl1?.Alignment?.Value
+                        ?? masterMatch?.TextBody?.Elements<A.Paragraph>().FirstOrDefault()?.ParagraphProperties?.Alignment?.Value
+                        ?? masterLstLvl1?.Alignment?.Value
+                        ?? styleLevel1?.Alignment?.Value;
+                    if (resolvedAlign != null)
+                    {
+                        pPr.Alignment = resolvedAlign;
+                        changed = true;
+                    }
+                }
+
+                // Line spacing: own paragraph -> own lstStyle -> layout placeholder lstStyle ->
+                // master placeholder lstStyle -> master titleStyle/bodyStyle/otherStyle. Not
+                // theme-relative (always a literal percent/points value), so no flattening
+                // decision is needed - just copy it down if the paragraph doesn't already have
+                // its own.
+                if (pPr.LineSpacing == null)
+                {
+                    var resolvedLineSpacing = ownLstLvl1?.LineSpacing
+                        ?? layoutLstLvl1?.LineSpacing
+                        ?? masterLstLvl1?.LineSpacing
+                        ?? styleLevel1?.LineSpacing;
+                    if (resolvedLineSpacing != null)
+                    {
+                        pPr.LineSpacing = (A.LineSpacing)resolvedLineSpacing.CloneNode(true);
+                        changed = true;
+                    }
+                }
+
+                // All-caps: resolved once per paragraph from the same inheritance chain's
+                // defRPr, then applied to any run/end-run lacking its own local override.
+                var resolvedCaps = ownLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.Capital?.Value
+                    ?? layoutLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.Capital?.Value
+                    ?? masterLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.Capital?.Value
+                    ?? styleLevel1?.GetFirstChild<A.DefaultRunProperties>()?.Capital?.Value;
+
+                if (resolvedCaps != null)
+                {
+                    changed |= ApplyToRunsIfMissing(paragraph, rPr => rPr.Capital == null, rPr => rPr.Capital = resolvedCaps);
+                }
+
+                // Color: resolved once per paragraph from the same inheritance chain's defRPr
+                // solidFill, then always baked in as a literal RGB value scoped to the source
+                // slide's theme. This value does NOT travel with the shape on its own - it comes
+                // from the source's layout/master, which the destination shape won't consult (it
+                // inherits from whatever layout/master the destination slide uses instead). So
+                // unlike the shape-level solidFill/fillRef flattening above (where the element is
+                // part of the shape itself and a literal RGB there is already context-independent),
+                // there's no valid "would resolve the same on the destination" shortcut here: a
+                // dst-side comparison would have to replicate the destination's own placeholder
+                // match + inheritance walk, not just reinterpret the source's resolved element
+                // under a different theme. Always flattening is the only safe option. Fill must
+                // precede latin/ea/cs in CT_TextCharacterProperties child order, so it's inserted
+                // first.
+                var resolvedFill = ownLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.GetFirstChild<A.SolidFill>()
+                    ?? layoutLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.GetFirstChild<A.SolidFill>()
+                    ?? masterLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.GetFirstChild<A.SolidFill>()
+                    ?? styleLevel1?.GetFirstChild<A.DefaultRunProperties>()?.GetFirstChild<A.SolidFill>();
+
+                var literalFillHex = ResolveSolidFillHex(resolvedFill, themeCtx);
+                if (literalFillHex != null)
+                {
+                    changed |= ApplyToRunsIfMissing(
+                        paragraph,
+                        rPr => rPr.GetFirstChild<A.SolidFill>() == null,
+                        rPr => rPr.InsertAt(new A.SolidFill(new A.RgbColorModelHex { Val = literalFillHex }), 0));
+                }
+
+                // Font family: resolved once per paragraph from the same inheritance chain's
+                // defRPr latin typeface, then always baked in as a literal typeface name scoped to
+                // the source slide's theme - same reasoning as the fill above.
+                var resolvedLatinFont = ownLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.GetFirstChild<A.LatinFont>()
+                    ?? layoutLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.GetFirstChild<A.LatinFont>()
+                    ?? masterLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.GetFirstChild<A.LatinFont>()
+                    ?? styleLevel1?.GetFirstChild<A.DefaultRunProperties>()?.GetFirstChild<A.LatinFont>();
+
+                var literalTypefaceName = ResolveLatinTypefaceName(resolvedLatinFont, themeCtx.FontScheme);
+                if (literalTypefaceName != null)
+                {
+                    changed |= ApplyToRunsIfMissing(
+                        paragraph,
+                        rPr => rPr.GetFirstChild<A.LatinFont>() == null,
+                        rPr => rPr.AppendChild(new A.LatinFont { Typeface = literalTypefaceName }));
+                }
+
+                // Font size: same inheritance chain and same "always flatten" reasoning as
+                // color/typeface above - the resolved size is a literal point value (hundredths
+                // of a point) sourced from the source's own layout/master, not theme-relative,
+                // but still meaningless to the destination's own placeholder/master chain.
+                var resolvedFontSize = ownLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.FontSize
+                    ?? layoutLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.FontSize
+                    ?? masterLstLvl1?.GetFirstChild<A.DefaultRunProperties>()?.FontSize
+                    ?? styleLevel1?.GetFirstChild<A.DefaultRunProperties>()?.FontSize;
+
+                if (resolvedFontSize != null)
+                {
+                    changed |= ApplyToRunsIfMissing(
+                        paragraph,
+                        rPr => rPr.FontSize == null,
+                        rPr => rPr.FontSize = resolvedFontSize.Value);
+                }
+            }
+        }
+
+        if (!changed)
+        {
+            return null;
+        }
+
+        using var outStream = new MemoryStream();
+        sdkDoc.Clone(outStream);
+        return new Presentation(outStream);
+    }
+
+    /// <summary>
+    /// Bakes in one text-frame inset (margin) property on <paramref name="txBody"/>'s
+    /// BodyProperties, resolved from layout placeholder -> master placeholder when the shape
+    /// itself has no local value for it. Mirrors the vertical-anchor resolution above.
+    /// </summary>
+    private static bool HardenInset(
+        P.TextBody txBody,
+        P.Shape? layoutMatch,
+        P.Shape? masterMatch,
+        Func<A.BodyProperties, Int32Value?> getInset,
+        Action<A.BodyProperties, Int32Value?> setInset)
+    {
+        if (txBody.BodyProperties != null && getInset(txBody.BodyProperties) != null)
+        {
+            return false;
+        }
+
+        var resolved = (layoutMatch?.TextBody?.BodyProperties is { } layoutBp ? getInset(layoutBp) : null)
+            ?? (masterMatch?.TextBody?.BodyProperties is { } masterBp ? getInset(masterBp) : null);
+
+        if (resolved == null)
+        {
+            return false;
+        }
+
+        txBody.BodyProperties ??= new A.BodyProperties();
+        setInset(txBody.BodyProperties, resolved);
+        return true;
+    }
+
+    /// <summary>
+    /// Applies a resolved property to every run's RunProperties in a paragraph, and to its
+    /// EndParagraphRunProperties, skipping any that already have their own local override
+    /// (per <paramref name="isMissing"/>). Both element types share the same OOXML base
+    /// (TextCharacterPropertiesType), so one helper covers both. Returns whether anything changed.
+    /// </summary>
+    private static bool ApplyToRunsIfMissing(
+        A.Paragraph paragraph,
+        Func<A.TextCharacterPropertiesType, bool> isMissing,
+        Action<A.TextCharacterPropertiesType> apply)
+    {
+        bool changed = false;
+
+        foreach (var run in paragraph.Elements<A.Run>())
+        {
+            run.RunProperties ??= new A.RunProperties();
+            if (isMissing(run.RunProperties))
+            {
+                apply(run.RunProperties);
+                changed = true;
+            }
+        }
+
+        // An empty placeholder paragraph (no runs, no endParaRPr at all) has nowhere to attach
+        // resolved formatting - without creating one here, it falls through untouched and the
+        // clone silently inherits the destination's own layout/master defaults instead.
+        var endRunProps = paragraph.GetFirstChild<A.EndParagraphRunProperties>();
+        if (endRunProps == null)
+        {
+            endRunProps = new A.EndParagraphRunProperties();
+            paragraph.AppendChild(endRunProps);
+        }
+
+        if (isMissing(endRunProps))
+        {
+            apply(endRunProps);
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Finds the shape on a layout/master's shape tree that a slide placeholder inherits from:
+    /// matched by idx first (exact placeholder binding), falling back to type when idx doesn't
+    /// match any candidate (or the placeholder has no idx).
+    /// </summary>
+    private static P.Shape? FindMatchingPlaceholder(List<P.Shape> candidates, P.PlaceholderShape ph)
+    {
+        P.PlaceholderShape? GetPh(P.Shape s) =>
+            s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.GetFirstChild<P.PlaceholderShape>();
+
+        if (ph.Index != null)
+        {
+            var byIndex = candidates.FirstOrDefault(s => GetPh(s)?.Index?.Value == ph.Index.Value);
+            if (byIndex != null)
+            {
+                return byIndex;
+            }
+        }
+
+        var phType = ph.Type?.Value ?? P.PlaceholderValues.Body;
+        return candidates.FirstOrDefault(s => (GetPh(s)?.Type?.Value ?? P.PlaceholderValues.Body) == phType);
+    }
+
+    /// <summary>
+    /// Returns the master's Level1ParagraphProperties for the txStyles bucket matching a
+    /// placeholder type (titleStyle for title/ctrTitle, bodyStyle for body/subTitle/obj and the
+    /// no-type default, otherStyle for everything else).
+    /// </summary>
+    private static A.Level1ParagraphProperties? GetStyleLevel1(P.TextStyles? txStyles, P.PlaceholderValues? type)
+    {
+        if (txStyles == null)
+        {
+            return null;
+        }
+
+        if (type == null || type == P.PlaceholderValues.Body || type == P.PlaceholderValues.SubTitle || type == P.PlaceholderValues.Object)
+        {
+            return txStyles.BodyStyle?.GetFirstChild<A.Level1ParagraphProperties>();
+        }
+
+        if (type == P.PlaceholderValues.Title || type == P.PlaceholderValues.CenteredTitle)
+        {
+            return txStyles.TitleStyle?.GetFirstChild<A.Level1ParagraphProperties>();
+        }
+
+        return txStyles.OtherStyle?.GetFirstChild<A.Level1ParagraphProperties>();
+    }
+
+    /// <summary>
+    /// Theme + color-map resolved for one slide, so a schemeClr/+mn-lt/+mj-lt reference found on
+    /// that slide (or its layout/master placeholders) can be flattened to a literal value scoped
+    /// to that slide's own theme - before the shape is cloned into a destination slide that may
+    /// be bound to a different theme.
+    /// </summary>
+    private sealed class SlideThemeContext
+    {
+        public A.FontScheme? FontScheme { get; init; }
+        public A.ColorScheme? ColorScheme { get; init; }
+        public P.ColorMap? ColorMap { get; init; }
+
+        // schemeClr reference names that are resolved indirectly, through the master's clrMap,
+        // to a clrScheme slot. dk1/lt1/dk2/lt2 are deliberately absent: those reference names
+        // bypass clrMap and name a clrScheme slot directly (see DirectSlots below).
+        private static readonly Dictionary<A.SchemeColorValues, Func<P.ColorMap, EnumValue<A.ColorSchemeIndexValues>?>> ClrMapSlots = new()
+        {
+            [A.SchemeColorValues.Background1] = cm => cm.Background1,
+            [A.SchemeColorValues.Text1] = cm => cm.Text1,
+            [A.SchemeColorValues.Background2] = cm => cm.Background2,
+            [A.SchemeColorValues.Text2] = cm => cm.Text2,
+            [A.SchemeColorValues.Accent1] = cm => cm.Accent1,
+            [A.SchemeColorValues.Accent2] = cm => cm.Accent2,
+            [A.SchemeColorValues.Accent3] = cm => cm.Accent3,
+            [A.SchemeColorValues.Accent4] = cm => cm.Accent4,
+            [A.SchemeColorValues.Accent5] = cm => cm.Accent5,
+            [A.SchemeColorValues.Accent6] = cm => cm.Accent6,
+            [A.SchemeColorValues.Hyperlink] = cm => cm.Hyperlink,
+            [A.SchemeColorValues.FollowedHyperlink] = cm => cm.FollowedHyperlink,
+        };
+
+        // schemeClr reference names that name a clrScheme slot directly: dk1/lt1/dk2/lt2 always
+        // (clrMap never touches them), and accent1-6/hlink/folHlink as a fallback for when
+        // ColorMap is missing entirely (their names happen to match the clrScheme slot names).
+        private static readonly Dictionary<A.SchemeColorValues, A.ColorSchemeIndexValues> DirectSlots = new()
+        {
+            [A.SchemeColorValues.Dark1] = A.ColorSchemeIndexValues.Dark1,
+            [A.SchemeColorValues.Light1] = A.ColorSchemeIndexValues.Light1,
+            [A.SchemeColorValues.Dark2] = A.ColorSchemeIndexValues.Dark2,
+            [A.SchemeColorValues.Light2] = A.ColorSchemeIndexValues.Light2,
+            [A.SchemeColorValues.Accent1] = A.ColorSchemeIndexValues.Accent1,
+            [A.SchemeColorValues.Accent2] = A.ColorSchemeIndexValues.Accent2,
+            [A.SchemeColorValues.Accent3] = A.ColorSchemeIndexValues.Accent3,
+            [A.SchemeColorValues.Accent4] = A.ColorSchemeIndexValues.Accent4,
+            [A.SchemeColorValues.Accent5] = A.ColorSchemeIndexValues.Accent5,
+            [A.SchemeColorValues.Accent6] = A.ColorSchemeIndexValues.Accent6,
+            [A.SchemeColorValues.Hyperlink] = A.ColorSchemeIndexValues.Hyperlink,
+            [A.SchemeColorValues.FollowedHyperlink] = A.ColorSchemeIndexValues.FollowedHyperlink,
+        };
+
+        /// <summary>
+        /// Maps a schemeClr reference (bg1/tx1/bg2/tx2/accent1-6/hlink/folHlink/dk1/lt1/dk2/lt2)
+        /// to the clrScheme slot it designates on this slide's theme. ColorMap's properties are
+        /// typed as ColorSchemeIndexValues (the clrScheme slot vocabulary), a distinct OpenXml
+        /// enum from SchemeColorValues (the schemeClr reference vocabulary) even though most
+        /// members share a name.
+        /// </summary>
+        public A.ColorSchemeIndexValues MapColor(A.SchemeColorValues val)
+        {
+            if (ColorMap != null && ClrMapSlots.TryGetValue(val, out var accessor) && accessor(ColorMap) is { } mapped)
+            {
+                return mapped.Value;
+            }
+
+            return DirectSlots.TryGetValue(val, out var direct) ? direct : A.ColorSchemeIndexValues.Dark1;
+        }
+    }
+
+    /// <summary>
+    /// Walks slide -&gt; layout -&gt; master to find the theme and color map that govern a slide's
+    /// own shapes (not a placeholder's layout/master counterpart - this is the slide's own
+    /// binding, used to resolve theme-relative references before a shape leaves this slide).
+    /// </summary>
+    private static SlideThemeContext ResolveThemeContext(SlidePart slidePart)
+    {
+        var layoutPart = slidePart.SlideLayoutPart;
+        var masterPart = layoutPart?.SlideMasterPart;
+        var theme = masterPart?.ThemePart?.Theme;
+
+        return new SlideThemeContext
+        {
+            FontScheme = theme?.ThemeElements?.FontScheme,
+            ColorScheme = theme?.ThemeElements?.ColorScheme,
+            ColorMap = masterPart?.SlideMaster?.ColorMap,
+        };
+    }
+
+    /// <summary>
+    /// Resolves a +mn-lt/+mj-lt theme-scheme latin font reference to its literal typeface name.
+    /// Returns null for a font that's already literal (nothing to flatten) or when no font
+    /// scheme is available.
+    /// </summary>
+    private static string? ResolveLatinTypefaceName(A.LatinFont? latin, A.FontScheme? fontScheme)
+    {
+        var typeface = latin?.Typeface?.Value;
+        if (typeface == null)
+        {
+            return null;
+        }
+
+        if (typeface == "+mn-lt")
+        {
+            return ResolveLatinTypeface(fontScheme, major: false);
+        }
+
+        if (typeface == "+mj-lt")
+        {
+            return ResolveLatinTypeface(fontScheme, major: true);
+        }
+
+        // Already a literal typeface - nothing to flatten.
+        return null;
+    }
+
+    private static string? ResolveLatinTypeface(A.FontScheme? fontScheme, bool major)
+    {
+        return major
+            ? fontScheme?.MajorFont?.LatinFont?.Typeface?.Value
+            : fontScheme?.MinorFont?.LatinFont?.Typeface?.Value;
+    }
+
+    /// <summary>
+    /// Whether a theme-relative reference actually needs flattening to a literal value: only
+    /// when the destination slide's theme would resolve it to something different than the
+    /// source slide's theme does. If the destination theme can't be determined, flatten
+    /// defensively (the pre-existing, always-flatten behavior). If there's nothing to resolve
+    /// on the source side, there's nothing to flatten either way.
+    /// </summary>
+    private static bool NeedsFlattening(string? srcValue, string? dstValue, SlideThemeContext? dstThemeCtx)
+    {
+        if (srcValue == null)
+        {
+            return false;
+        }
+
+        if (dstThemeCtx == null)
+        {
+            return true;
+        }
+
+        return !string.Equals(srcValue, dstValue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Resolves a defRPr's solidFill (literal RGB or schemeClr) to a literal RGB hex string
+    /// scoped to the given slide's theme/color-map. Returns null when there's nothing to
+    /// resolve.
+    /// </summary>
+    private static string? ResolveSolidFillHex(A.SolidFill? solidFill, SlideThemeContext themeCtx)
+    {
+        if (solidFill == null)
+        {
+            return null;
+        }
+
+        var rgb = solidFill.GetFirstChild<A.RgbColorModelHex>();
+        if (rgb?.Val?.Value != null)
+        {
+            return rgb.Val.Value;
+        }
+
+        var schemeClr = solidFill.GetFirstChild<A.SchemeColor>();
+        if (schemeClr?.Val?.Value is A.SchemeColorValues schemeVal)
+        {
+            return ResolveSchemeColorHex(themeCtx.ColorScheme, themeCtx.MapColor(schemeVal));
+        }
+
+        return null;
+    }
+
+    // clrScheme slot -> accessor into A.ColorScheme. Shared slot-name vocabulary with
+    // SlideThemeContext.DirectSlots/ClrMapSlots above (ColorSchemeIndexValues), since this is the
+    // same clrScheme the clrMap maps into.
+    private static readonly Dictionary<A.ColorSchemeIndexValues, Func<A.ColorScheme, A.Color2Type?>> ColorSchemeSlots = new()
+    {
+        [A.ColorSchemeIndexValues.Dark1] = cs => cs.Dark1Color,
+        [A.ColorSchemeIndexValues.Light1] = cs => cs.Light1Color,
+        [A.ColorSchemeIndexValues.Dark2] = cs => cs.Dark2Color,
+        [A.ColorSchemeIndexValues.Light2] = cs => cs.Light2Color,
+        [A.ColorSchemeIndexValues.Accent1] = cs => cs.Accent1Color,
+        [A.ColorSchemeIndexValues.Accent2] = cs => cs.Accent2Color,
+        [A.ColorSchemeIndexValues.Accent3] = cs => cs.Accent3Color,
+        [A.ColorSchemeIndexValues.Accent4] = cs => cs.Accent4Color,
+        [A.ColorSchemeIndexValues.Accent5] = cs => cs.Accent5Color,
+        [A.ColorSchemeIndexValues.Accent6] = cs => cs.Accent6Color,
+        [A.ColorSchemeIndexValues.Hyperlink] = cs => cs.Hyperlink,
+        [A.ColorSchemeIndexValues.FollowedHyperlink] = cs => cs.FollowedHyperlinkColor,
+    };
+
+    private static string? ResolveSchemeColorHex(A.ColorScheme? colorScheme, A.ColorSchemeIndexValues mappedVal)
+    {
+        if (colorScheme == null || !ColorSchemeSlots.TryGetValue(mappedVal, out var accessor))
+        {
+            return null;
+        }
+
+        return accessor(colorScheme)?.GetFirstChild<A.RgbColorModelHex>()?.Val?.Value;
     }
 
     /// <summary>

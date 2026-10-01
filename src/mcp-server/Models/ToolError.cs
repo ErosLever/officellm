@@ -15,6 +15,7 @@ public static class ErrorCodes
     public const string RANGE_TOO_LARGE = "RANGE_TOO_LARGE";
     public const string INVALID_FORMULA = "INVALID_FORMULA";
     public const string CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED";
+    public const string INTERNAL_ERROR = "INTERNAL_ERROR";
 }
 
 /// <summary>

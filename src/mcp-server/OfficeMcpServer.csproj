@@ -22,6 +22,23 @@
   </PropertyGroup>
 
   <!--
+    ShapeCrawler is used for OOXML-level shape copying (preserves flipH/flipV,
+    arrowhead styling, and other attributes Office.js can't read back).
+    Its Magick.NET/SkiaSharp transitive deps are unused by the copy code paths
+    we rely on, so they're pinned and excluded to avoid shipping ~650MB of
+    native image-processing binaries. Re-verify on any ShapeCrawler upgrade.
+  -->
+  <ItemGroup>
+    <PackageReference Include="ShapeCrawler" Version="0.80.0" />
+    <PackageReference Include="Magick.NET-Q16-AnyCPU" Version="14.16.0" ExcludeAssets="all" />
+    <PackageReference Include="Magick.NET.Core" Version="14.16.0" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp" Version="4.151.1" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.151.1" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.151.1" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.151.1" ExcludeAssets="all" />
+  </ItemGroup>
+
+  <!--
     Pre-build: if GeneratedToken.cs is missing, run generate-token.mjs.
     Requires Node.js on PATH. On CI, run the script explicitly before dotnet build.
   -->
