@@ -11,12 +11,12 @@ public class McpToolEngineTests
 	}
 
     [Fact]
-    public void GetToolDefinitions_Returns137Tools()
+    public void GetToolDefinitions_Returns141Tools()
     {
         var tools = McpToolEngine.GetToolDefinitions();
 
         Assert.NotNull(tools);
-        Assert.Equal(137, tools.Length);
+        Assert.Equal(141, tools.Length);
     }
 
     [Fact]
@@ -224,8 +224,10 @@ public class McpToolEngineTests
             var doc = JsonDocument.Parse(json);
             var name = doc.RootElement.GetProperty("name").GetString()!;
 
-            // These tools don't require instanceId
-            if (name is "office_get_active_apps" or "office_get_document_context" or "office_batch_call" or "office_suggest_tools") continue;
+            // These tools don't require instanceId (either genuinely don't need one, or use
+            // srcInstanceId/dstInstanceId instead since they operate across two presentations)
+            if (name is "office_get_active_apps" or "office_get_document_context" or "office_batch_call" or "office_suggest_tools"
+                or "powerpoint_copy_shape" or "powerpoint_copy_shape_ooxml") continue;
 
             var required = doc.RootElement
                 .GetProperty("inputSchema")
